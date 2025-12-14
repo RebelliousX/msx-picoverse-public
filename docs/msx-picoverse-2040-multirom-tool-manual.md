@@ -37,7 +37,7 @@ The UF2 file (usually multirom.uf2) can then be copied to a Pico's USB mass stor
 
 ROM file names are used to name the entries in the MSX menu. There is a limit of 50 characters per name. A rolling effect is used to show longer names on the MSX menu, but if the name exceeds 50 characters it will be truncated.
 
-![alt text](image.png)
+![alt text](../images/multirom_2040_menu.png)
 
 If you want to use Nextor with your PicoVerse 2040 cartridge you need to run the tool with the `-s1` or `-s2` option to include the embedded Nextor ROM in the image. The `-s1` option includes the standard Nextor ROM without memory mapper support, while `-s2` includes a Nextor ROM with +240 KB memory mapper support. The embedded Nextor ROM will be the single firmwware loaded at boot, and the MultiROM menu will not be available. You can then use SofaRun to load ROMs and DSKs from the Pico's USB mass storage.
 
