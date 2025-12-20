@@ -11,6 +11,12 @@ PicoVerse is a community-driven effort to build versatile MSX cartridges powered
 - Open hardware schematics, BOMs, and production-ready Gerbers.
 - Active development roadmap covering RP2040 and RP2350-based cartridges.
 
+## Documentation
+
+- [PicoVerse 2040 MultiROM Guide](/docs/msx-picoverse-2040-multirom-tool-manual.md)
+- [PicoVerse 2040 Features Overview](/docs/msx-picoverse-2040-features.md)
+- [PicoVerse 2350 Features Overview](/docs/msx-picoverse-2350-features.md)
+
 ## Hardware Variants
 
 ### PicoVerse 2040 Cartridge
