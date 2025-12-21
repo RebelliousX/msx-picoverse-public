@@ -43,14 +43,6 @@ If you want to use Nextor with your PicoVerse 2040 cartridge you need to run the
 
 **Important Note:** To use a USB thumdrive you may need a OTG adapter or cable. That can be used to convert the USB-C port to a standard USB-A female port.
 
-## Constants and limits
-- Maximum number of ROM files processed: `MAX_ROM_FILES = 128`.
-- ROM filename length used in config: `MAX_FILE_NAME_LENGTH = 50`.
-- Number of ROMS displayed in menu: `MAX_MENU_ENTRIES = 19`.
-- Minimum ROM size accepted: `MIN_ROM_SIZE = 8192` bytes (8 KB).
-- Maximum ROM size accepted: `MAX_ROM_SIZE = 10*1024*1024` bytes.
-- The tool uses a fixed `TARGET_FILE_SIZE = 32768` bytes for the combined MSX menu ROM + configuration area and reserves `MENU_COPY_SIZE = 16 * 1024` (16KB) of the menu ROM to copy unchanged before the configuration payload.
-
 ## Command-line usage
 
 Only Microsoft Windows executables are provided for now (`multirom.exe`).
