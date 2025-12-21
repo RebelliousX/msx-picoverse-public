@@ -15,4 +15,3 @@ The MSX PicoVerse 2040 is a Raspberry Pi Pico-based MSX-compatible cartridge tha
 - **Compact Design**: The cartridge is designed to fit seamlessly into MSX systems without adding bulk.
 - **USB Mass Storage Support for Nextor**: Allows the use of the USB-C port as a mass storage device when running Nextor DOS.
 - **RAM Mapper Support**: Enables the use of additional RAM for applications that require it when running Nextor DOS.
-

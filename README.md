@@ -49,13 +49,14 @@ Interactive BOM available at [PicoVerse 2040 BOM](https://htmlpreview.github.io/
 ### PicoVerse 2350 Cartridge
 - Targets RP2350 boards exposing all 48 GPIO pins (not compatible with standard Pico 2 boards).
 - Adds microSD storage, ESP8266 WiFi header, and I2S audio expansion alongside 16 MB flash space.
+- Extra RAM to support advanced emulation features in future firmware releases.
 - Ships with a Nextor-first menu so you can boot straight into SofaRun or other disk-based tools.
 - Shares the same ROM mapper support list as the 2040 build.
 
 #### Bill of Materials
 | Reference | Description | Quantity | Link |
 | --- | --- | --- | --- |
-| U1 | RP2350 Dev Board 48 GPIO pins exposed | 1 | |
+| U1 | RP2350 Dev Board 48 GPIO pins exposed (modded for extra RAM) | 1 | |
 
 ## Repository Contents
 - `hardware/` – Production-ready Gerbers, fabrication notes, and BOMs for each supported dev board.

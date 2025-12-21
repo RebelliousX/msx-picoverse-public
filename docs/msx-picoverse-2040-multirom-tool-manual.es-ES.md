@@ -1,46 +1,54 @@
 # Proyecto MSX PicoVerse 2040
 
-|PicoVerse Frontal|PicoVerse Trasera|
+|PicoVerse Anverso|PicoVerse Reverso|
 |---|---|
-|![PicoVerse Frontal](/images/2025-12-02_20-05.png)|![PicoVerse Trasera](/images/2025-12-02_20-06.png)|
+|![PicoVerse Front](/images/2025-12-02_20-05.png)|![PicoVerse Back](/images/2025-12-02_20-06.png)|
 
-El PicoVerse 2040 es un cartucho para MSX basado en Raspberry Pi Pico que utiliza firmware intercambiable para ampliar las capacidades del equipo. Al cargar diferentes imágenes de firmware, el cartucho puede ejecutar juegos y aplicaciones MSX y emular dispositivos de hardware adicionales (como mappers de ROM, memoria RAM extra o interfaces de almacenamiento), añadiendo periféricos virtuales al MSX. Uno de esos firmwares es el sistema MultiROM, que proporciona un menú en pantalla para explorar y lanzar múltiples títulos ROM almacenados en el cartucho.
+El PicoVerse 2040 es un cartucho para MSX basado en Raspberry Pi Pico que utiliza firmware intercambiable para ampliar las capacidades del ordenador. Cargando distintas imágenes de firmware, el cartucho puede ejecutar juegos y aplicaciones MSX y emular dispositivos hardware adicionales (como mapeadores de ROM, RAM extra o interfaces de almacenamiento), añadiendo efectivamente periféricos virtuales al MSX. Uno de estos firmwares es el sistema MultiROM, que proporciona un menú en pantalla para explorar y lanzar múltiples títulos ROM almacenados en el cartucho.
 
-El cartucho también puede exponer el puerto USB‑C del Pico como dispositivo de almacenamiento masivo, permitiendo copiar ROMs, DSKs y otros archivos directamente desde un ordenador al cartucho.
+El cartucho también puede exponer el puerto USB‑C del Pico como un dispositivo de almacenamiento masivo, permitiendo copiar ROMs, DSKs y otros archivos directamente desde un PC con Windows o Linux al cartucho.
 
-Además, se puede usar una variante de firmware Nextor con soporte de mapper de memoria +240 KB para aprovechar completamente el hardware PicoVerse 2040 en sistemas MSX con memoria limitada.
+Además, se puede usar una variante de firmware Nextor con soporte de mapeador de memoria +240 KB para aprovechar al máximo el hardware del PicoVerse 2040 en sistemas MSX con memoria limitada.
 
-Características disponibles en la versión actual del cartucho PicoVerse 2040:
+Estas son las características disponibles en la versión actual del cartucho PicoVerse 2040:
 
 * Sistema de menú MultiROM para seleccionar y lanzar ROMs MSX.
-* Soporte para Nextor OS con mapper de memoria opcional de +240 KB.
-* Soporte de dispositivo de almacenamiento masivo USB para cargar ROMs y DSKs.
-* Soporte para varios mappers MSX (PL-16, PL-32, KonSCC, Linear, ASC-08, ASC-16, Konami, NEO-8, NEO-16).
+* Soporte de Nextor OS con mapeador de memoria opcional de +240 KB.
+* Soporte de dispositivo de almacenamiento USB para cargar ROMs y DSKs.
+* Soporte para varios mapeadores de ROM MSX (PL-16, PL-32, KonSCC, Linear, ASC-08, ASC-16, Konami, NEO-8, NEO-16).
 * Compatibilidad con sistemas MSX, MSX2 y MSX2+.
 
 ## Manual del creador de UF2 MultiROM
 
 Esta sección documenta la herramienta de consola `multirom` usada para generar imágenes UF2 (`multirom.uf2`) que programan el cartucho PicoVerse 2040.
 
-Por defecto, la herramienta `multirom` escanea archivos ROM MSX en un directorio y los empaqueta en una sola imagen UF2 que puede flashearse al Raspberry Pi Pico. La imagen resultante suele contener el binario de firmware del Pico, la ROM del menú MultiROM, un área de configuración que describe cada entrada ROM y las cargas útiles de las ROMs.
+Por defecto, la herramienta `multirom` escanea archivos ROM MSX en un directorio y los empaqueta en una única imagen UF2 que puede ser flasheada en la Raspberry Pi Pico. La imagen resultante típicamente contiene el binario del firmware del Pico, la ROM del menú MSX de MultiROM, un área de configuración que describe cada entrada ROM y las propias cargas útiles de las ROM.
 
-Dependiendo de las opciones, `multirom` también puede producir UF2 que arrancan directamente en un firmware personalizado en lugar del menú MultiROM. Por ejemplo, se pueden generar UF2 con un firmware que implemente Nextor. En ese modo, el puerto USB‑C del Pico puede usarse como almacenamiento masivo para cargar ROMs y DSKs desde Nextor (por ejemplo, mediante SofaRun).
+> **Nota:** Se pueden incluir hasta 128 ROMs en una sola imagen, con un límite de tamaño total aproximado de 16 MB.
+
+Dependiendo de las opciones proporcionadas, `multirom` también puede producir imágenes UF2 que arranquen directamente en un firmware personalizado en lugar del menú MultiROM. Por ejemplo, se pueden generar UF2 con un firmware que implemente Nextor. En ese modo, el puerto USB‑C del Pico puede usarse como dispositivo de almacenamiento masivo para cargar ROMs, DSKs y otros archivos desde Nextor (por ejemplo, usando SofaRun).
 
 ## Visión general
 
-Si se ejecuta sin opciones, la herramienta `multirom.exe` escanea el directorio de trabajo actual en busca de archivos ROM MSX (`.ROM` o `.rom`), analiza cada ROM para intentar adivinar el tipo de mapper, construye una tabla de configuración describiendo cada ROM (nombre, byte de mapper, tamaño, offset) e inserta esta tabla en una porción de la ROM de menú MSX. La herramienta concatena el blob de firmware del Pico, la porción de la ROM de menú, el área de configuración y las ROMs, y serializa toda la imagen en un archivo UF2 llamado `multirom.uf2`.
+Si se ejecuta sin opciones, la herramienta `multirom.exe` escanea el directorio de trabajo actual en busca de archivos ROM MSX (`.ROM` o `.rom`), analiza cada ROM para adivinar el tipo de mapeador, construye una tabla de configuración que describe cada ROM (nombre, byte de mapeador, tamaño, offset) e inserta esta tabla en una porción de la ROM del menú MSX. La herramienta concatena el blob del firmware del Pico, la porción del menú, el área de configuración y las cargas de las ROMs y serializa toda la imagen en un archivo UF2 llamado `multirom.uf2`.
 
-La copia UF2 (normalmente `multirom.uf2`) puede copiarse al dispositivo de almacenamiento masivo USB del Pico para flashear la imagen combinada. Hay que conectar el Pico manteniendo pulsado el botón BOOTSEL para entrar en el modo UF2. Aparecerá una nueva unidad USB llamada `RPI-RP2` y se puede copiar `multirom.uf2` a ella. Tras completarse la copia, desconecte el Pico e inserte el cartucho en su MSX para arrancar el menú MultiROM.
+![alt text](/images/2025-11-29_20-49.png)
 
-Los nombres de archivo ROM se usan para nombrar las entradas en el menú MSX. Hay un límite de 50 caracteres por nombre. Se muestra un efecto desplazable para nombres más largos, pero si el nombre supera 50 caracteres se truncará.
+El archivo UF2 (normalmente multirom.uf2) puede copiarse al dispositivo de almacenamiento masivo USB del Pico para flashear la imagen combinada. Debe conectar el Pico mientras mantiene presionado el botón BOOTSEL para entrar en el modo de flasheo UF2. Entonces aparece una nueva unidad USB llamada `RPI-RP2`, y puede copiar `multirom.uf2` en ella. Tras completar la copia, desconecte el Pico e inserte el cartucho en su MSX para arrancar el menú MultiROM.
 
-Si desea usar Nextor con su PicoVerse 2040 debe ejecutar la herramienta con la opción `-s1` o `-s2` para incluir la ROM Nextor embebida en la imagen. La opción `-s1` incluye la ROM Nextor estándar sin soporte de mapper, mientras que `-s2` incluye una ROM Nextor con soporte de mapper +240 KB. La ROM Nextor embebida será el único firmware cargado al arrancar y el menú MultiROM no estará disponible. A continuación puede usar SofaRun para cargar ROMs y DSKs desde el almacenamiento masivo USB del Pico.
+Los nombres de los archivos ROM se usan para nombrar las entradas en el menú MSX. Hay un límite de 50 caracteres por nombre. Se utiliza un efecto de desplazamiento para mostrar nombres más largos en el menú MSX, pero si el nombre supera los 50 caracteres será truncado.
 
-Nota importante: Para usar una unidad USB normal puede necesitar un adaptador OTG o un cable para convertir el puerto USB‑C a USB‑A hembra.
+![alt text](/images/multirom_2040_menu.png)
 
-## Uso por línea de comandos
+Si desea usar Nextor con su cartucho PicoVerse 2040 debe ejecutar la herramienta con la opción `-s1` o `-s2` para incluir la ROM Nextor embebida en la imagen. La opción `-s1` incluye la ROM Nextor estándar sin soporte de mapeador de memoria, mientras que `-s2` incluye una ROM Nextor con soporte de mapeador de +240 KB. La ROM Nextor embebida será el único firmware cargado al arrancar y el menú MultiROM no estará disponible. Entonces podrá usar SofaRun para cargar ROMs y DSKs desde el almacenamiento masivo USB del Pico.
 
-Solo se proporcionan ejecutables de Microsoft Windows por ahora (`multirom.exe`).
+> **Nota:** Para usar una memoria USB puede necesitar un adaptador o cable OTG. Esto se puede usar para convertir el puerto USB‑C a un conector USB‑A hembra estándar.
+
+> **Nota:** La opción `-n` incluye una ROM Nextor embebida experimental que funciona en modelos MSX2 específicos. Esta versión usa un método de comunicación distinto (basado en puertos IO) y puede no funcionar en todos los sistemas.
+
+## Uso en línea de comandos
+
+Solo se proporcionan ejecutables para Microsoft Windows por ahora (`multirom.exe`).
 
 ### Uso básico:
 
@@ -49,139 +57,146 @@ multirom.exe [options]
 ```
 
 ### Opciones:
-- `-n`, `--nextor`: Incluye la ROM NEXTOR embebida desde la configuración y la salida. Esta opción aún es experimental y por ahora solo funciona en modelos específicos MSX2.
-- `-h`, `--help`: Muestra la ayuda y sale.
-- `-o <filename>`, `--output <filename>`: Establece el nombre del archivo UF2 de salida (por defecto `multirom.uf2`).
-- `-s1`: El cartucho arranca con Sunrise IDE Nextor (sin mapper de memoria).
-- `-s2`: El cartucho arranca con Sunrise IDE Nextor (+240 KB de mapper de memoria).
+- `-n`, `--nextor` : Incluye la ROM NEXTOR beta embebida desde la configuración y la salida. Esta opción aún es experimental y por el momento solo funciona en modelos MSX2 específicos.
+- `-h`, `--help`   : Muestra la ayuda de uso y sale.
+- `-o <filename>`, `--output <filename>` : Establece el nombre del archivo UF2 de salida (por defecto `multirom.uf2`).
+- `-s1`            : El cartucho arranca con Sunrise IDE Nextor (sin mapeador de memoria).
+- `-s2`            : El cartucho arranca con Sunrise IDE Nextor (+240 KB de mapeador de memoria).
 - Si no se especifica `-s1` ni `-s2`, la herramienta produce una imagen MultiROM con el menú.
-- Si necesita forzar un tipo de mapper específico para una ROM, puede añadir una etiqueta de mapper antes de la extensión `.ROM` en el nombre del archivo. La etiqueta no distingue mayúsculas de minúsculas. Por ejemplo, nombrar un archivo `Knight Mare.PL-32.ROM` fuerza el uso del mapper PL-32 para esa ROM. Las etiquetas como `SYSTEM` se ignoran.
+- Si necesita forzar un tipo de mapeador específico para un archivo ROM, puede añadir una etiqueta de mapeador antes de la extensión `.ROM` en el nombre del archivo. La etiqueta no distingue entre mayúsculas y minúsculas. Por ejemplo, nombrar un archivo `Knight Mare.PL-32.ROM` fuerza el uso del mapeador PL-32 para esa ROM. Etiquetas como `SYSTEM` se ignoran. La lista de etiquetas posibles es: `PL-16,  PL-32,  KonSCC,  Linear,  ASC-08,  ASC-16,  Konami,  NEO-8,  NEO-16`
 
 ### Ejemplos
-- Produce `multirom.uf2` con el menú MultiROM y todas las `.ROM` en el directorio actual:
-```
-multirom.exe
-```
+- Produce el archivo multirom.uf2 con el menú MultiROM y todas las `.ROM` del directorio actual. Puede ejecutar la herramienta desde el símbolo del sistema o simplemente haciendo doble clic en el ejecutable:
+  ```
+  multirom.exe
+  ```
 
-- Produce `multirom.uf2` con la ROM Sunrise IDE Nextor (sin mapper de memoria):
-```
-multirom.exe -s1
-```
-- Produce `multirom.uf2` con la ROM Sunrise IDE Nextor (+240 KB de mapper de memoria):
-```
-multirom.exe -s2
-```
+- Produce el archivo multirom.uf2 con la ROM Sunrise IDE Nextor (sin mapeador de memoria):
+  ```
+  multirom.exe -s1
+  ```
+- Produce el archivo multirom.uf2 con la ROM Sunrise IDE Nextor (+240 KB de mapeador de memoria):
+  ```
+  multirom.exe -s2
+  ```
 
-## Cómo funciona (alto nivel)
+## Cómo funciona (a alto nivel)
 
-1. La herramienta escanea el directorio de trabajo actual buscando archivos con extensión `.ROM` o `.rom`. Para cada archivo:
+1. La herramienta escanea el directorio de trabajo actual en busca de archivos que terminen en `.ROM` o `.rom`. Para cada archivo:
    - Extrae un nombre para mostrar (nombre de archivo sin extensión, truncado a 50 caracteres).
    - Obtiene el tamaño del archivo y valida que esté entre `MIN_ROM_SIZE` y `MAX_ROM_SIZE`.
-   - Llama a `detect_rom_type()` para determinar heurísticamente el byte de mapper a usar en la entrada de configuración. Si hay una etiqueta de mapper en el nombre del archivo, esta anula la detección.
-   - Si la detección falla, el archivo se omite.
-   - Serializa el registro de configuración por ROM (nombre de 50 bytes, 1 byte de mapper, 4 bytes de tamaño LE, 4 bytes de offset en flash LE) en el área de configuración.
-2. Tras el escaneo, la herramienta concatena (en orden): el binario de firmware del Pico embebido, una porción inicial de la ROM del menú MSX (`MENU_COPY_SIZE` bytes), el área completa de configuración (`CONFIG_AREA_SIZE` bytes), la ROM NEXTOR opcional y luego las cargas útiles ROM descubiertas en orden de descubrimiento.
-3. La carga combinada se escribe como un archivo UF2 llamado `multirom.uf2` usando `create_uf2_file()` que produce bloques UF2 de 256 bytes dirigidos a la dirección de flash del Pico `0x10000000`.
+   - Llama a `detect_rom_type()` para determinar heurísticamente el byte de mapeador a usar en la entrada de configuración. Si hay una etiqueta de mapeador presente en el nombre del archivo, esta anula la detección.
+   - Si la detección del mapeador falla, el archivo se omite.
+   - Serializa el registro de configuración por ROM (nombre de 50 bytes, 1 byte de mapeador, 4 bytes de tamaño LE, 4 bytes de offset en flash LE) en el área de configuración.
+2. Tras el escaneo, la herramienta concatena (en este orden): binario del firmware embebido del Pico, un fragmento inicial de la ROM del menú MSX (`MENU_COPY_SIZE` bytes), el área completa de configuración (`CONFIG_AREA_SIZE` bytes), la ROM NEXTOR opcional y luego las cargas útiles de las ROMs descubiertas en el orden de descubrimiento.
+3. La carga combinada se escribe en un archivo UF2 llamado `multirom.uf2` usando `create_uf2_file()` que produce bloques UF2 de 256 bytes dirigidos a la dirección de flash del Pico `0x10000000`.
 
-## Heurísticas de detección de mappers
-- `detect_rom_type()` implementa una combinación de comprobaciones de firma (cabecera "AB", etiquetas `ROM_NEO8` / `ROM_NE16`) y escaneo heurístico de opcodes y direcciones para elegir mappers MSX comunes, incluyendo (pero no limitado a):
-  - Plain 16KB (mapper byte 1) — comprobación de cabecera 16KB AB
-  - Plain 32KB (mapper byte 2) — comprobación de cabecera 32KB AB
-  - Linear0 mapper (mapper byte 4) — comprobación especial de layout AB
-  - NEO8 (mapper byte 8) y NEO16 (mapper byte 9)
+## Heurísticas de detección de mapeadores
+- `detect_rom_type()` implementa una combinación de comprobaciones de firma (cabecera "AB", etiquetas `ROM_NEO8` / `ROM_NE16`) y un escaneo heurístico de opcodes y direcciones para elegir mapeadores MSX comunes, incluyendo (pero no limitado a):
+  - Plain 16KB (byte de mapeador 1) — comprobación de cabecera AB de 16KB
+  - Plain 32KB (byte de mapeador 2) — comprobación de cabecera AB de 32KB
+  - Mapeador Linear0 (byte de mapeador 4) — comprobación de disposición AB especial
+  - NEO8 (byte de mapeador 8) y NEO16 (byte de mapeador 9)
   - Konami, Konami SCC, ASCII8, ASCII16 y otros mediante puntuación ponderada
-- Si no se puede detectar un mapper con fiabilidad, la herramienta omite la ROM y reporta "unsupported mapper". Puede forzar un mapper mediante la etiqueta en el nombre del archivo.
-- Solo los siguientes mappers son compatibles en el área de configuración y el menú: `PL-16,  PL-32,  KonSCC,  Linear,  ASC-08,  ASC-16,  Konami,  NEO-8,  NEO-16`
+- Si no se puede detectar un mapeador de forma fiable, la herramienta omite la ROM y reporta "unsupported mapper". Recuerde que puede forzar un mapeador mediante la etiqueta en el nombre del archivo. Las etiquetas no distinguen mayúsculas/minúsculas y se listan más arriba.
+- Solo los siguientes mapeadores están soportados en el área de configuración y el menú: `PL-16,  PL-32,  KonSCC,  Linear,  ASC-08,  ASC-16,  Konami,  NEO-8,  NEO-16`
 
-## Uso del selector de ROM MSX (menú)
+## Uso del menú selector de ROMs MSX
 
-Al encender el MSX con el cartucho PicoVerse 2040 insertado, aparece el menú MultiROM mostrando la lista de ROMs disponibles. Puede navegar con las teclas de flecha del teclado.
+Al encender el MSX con el cartucho PicoVerse 2040 insertado, aparece el menú MultiROM mostrando la lista de ROMs disponibles. Puede navegar por el menú usando las teclas de flecha del teclado.
 
-Use las flechas Arriba y Abajo para mover el cursor de selección por la lista de ROMs. Si tiene más de 19 ROMs, use las flechas Izquierda y Derecha para desplazarse por las páginas de entradas.
+![alt text](/images/multirom_2040_menu.png)
 
-Pulse Enter o Espacio para ejecutar la ROM seleccionada. El MSX intentará arrancar la ROM usando la configuración de mapper adecuada.
+Use las teclas de flecha Arriba y Abajo para mover el cursor de selección por la lista de ROMs. Si tiene más de 19 ROMs, use las flechas laterales (Izquierda y Derecha) para desplazarse por las páginas de entradas.
 
-En cualquier momento dentro del menú, puede pulsar la tecla H para ver la pantalla de ayuda con instrucciones básicas. Pulse cualquier tecla para volver al menú principal.
+Pulse Enter o Espacio para lanzar la ROM seleccionada. El MSX intentará arrancar la ROM usando los ajustes de mapeador apropiados.
+
+En cualquier momento mientras esté en el menú, puede pulsar la tecla H para leer la pantalla de ayuda con instrucciones básicas. Pulse cualquier tecla para volver al menú principal.
 
 ## Uso de Nextor con el cartucho PicoVerse 2040
 
-Si flasheó el cartucho con firmware Nextor (usando `-s1` o `-s2`), el cartucho arrancará directamente en Nextor en lugar del menú MultiROM. Esas opciones se comunican con el MSX usando E/S mapeadas en memoria, por lo que el cartucho debe insertarse en una ranura de cartucho estándar.
+Si flasheó el cartucho con un firmware Nextor (usando las opciones `-s1` o `-s2`), el cartucho arrancará directamente en Nextor en lugar del menú MultiROM. Esas opciones se comunican con el MSX usando E/S mapeada en memoria, por lo que el cartucho debe estar insertado en una ranura de cartucho primaria.
 
-Una vez Nextor esté en ejecución, puede usar SofaRun u otro lanzador compatible con Nextor para cargar ROMs y DSKs desde el almacenamiento masivo USB del Pico. Puede necesitar un adaptador o cable OTG para conectar pendrives USB-A estándar al puerto USB‑C del cartucho.
+Una vez que Nextor esté en ejecución, puede usar SofaRun o cualquier otro lanzador compatible con Nextor para cargar ROMs y DSKs desde el dispositivo de almacenamiento masivo USB del Pico. Puede necesitar un adaptador o cable OTG para conectar memorias USB‑A estándar al puerto USB‑C del cartucho.
 
-En sistemas MSX2 o MSX2+ con la versión Nextor +240 KB (opción S2), el cartucho añadirá la memoria adicional al sistema y la secuencia de arranque del BIOS reflejará el aumento de RAM. Algunos modelos MSX muestran la memoria expandida total durante el arranque.
+En sistemas MSX2 o MSX2+, con la versión de Nextor con +240 KB de memoria (-s2), el cartucho añadirá la memoria extra al sistema y la secuencia del BIOS reflejará el aumento de RAM. Algunos modelos MSX muestran la memoria total expandida durante el arranque.
 
-La opción `-n` de la herramienta multirom incluye una ROM Nextor experimental embebida que puede usarse en modelos MSX2 específicos. Sin embargo, esta opción aún está en desarrollo y puede no funcionar en todos los sistemas. Esta versión usa un método distinto (basado en puertos IO) para comunicarse con el MSX, permitiendo su uso en sistemas donde la ranura de cartucho no es estándar/expandida.
+La opción -n de la herramienta multirom incluye una ROM Nextor embebida experimental que puede usarse en modelos MSX2 específicos. Sin embargo, esta opción sigue en desarrollo y puede no funcionar en todos los sistemas. Esta versión usa un método distinto (basado en puertos IO) para comunicarse con el MSX, permitiendo que funcione en sistemas donde la ranura de cartucho no es primaria, por ejemplo con expansores de ranura.
 
-Más detalles sobre el protocolo usado para comunicarse con el ordenador MSX están en Nextor-Pico-Bridge-Protocol.md. Los detalles de la comunicación con el firmware Sunrise IDE Nextor están en Sunrise-Nextor.md.
+Más detalles sobre el protocolo usado para comunicarse con el ordenador MSX se pueden encontrar en el documento Nextor-Pico-Bridge-Protocol.md. Los detalles de la comunicación con el firmware Sunrise IDE Nextor se encuentran en el documento Sunrise-Nextor.md.
 
-### Cómo preparar una unidad USB para Nextor
+### Cómo preparar una memoria USB para Nextor
 
-1. Conecte la unidad USB a su PC.
-2. Cree una partición FAT16 de máximo 4GB en la unidad USB. Puede usar herramientas del sistema operativo o software de particionado de terceros.
-3. Copie los archivos del sistema Nextor al directorio raíz de la partición FAT16. Puede obtener los archivos de Nextor desde la distribución oficial o repositorio. También necesita el archivo COMMAND2 para la shell de comandos:
-   1. [Nextor Download Page](https://github.com/Konamiman/Nextor/releases)
-   2. [Command2 Download Page](http://www.tni.nl/products/command2.html)
-4. Copie cualquier ROM MSX (`.ROM`) o imágenes de disco (`.DSK`) que quiera usar al directorio raíz de la unidad.
-5. Instale SofaRun u otro lanzador compatible con Nextor en la unidad si planea usarla para lanzar ROMs y DSKs. Puede descargar SofaRun desde: [SofaRun](https://www.louthrax.net/mgr/sofarun.html)
-6. Expulse la unidad USB de forma segura.
+Para preparar una memoria USB para usar con Nextor en el cartucho PicoVerse 2040, siga estos pasos:
+
+1. Conecte la memoria USB a su PC.
+2. Cree una partición FAT16 de máximo 4 GB en la memoria USB. Puede usar la herramienta incorporada de Nextor (CALL FDISK desde MSX Basic) o software de particionado de terceros para esto.
+3. Copie los archivos del sistema Nextor al directorio raíz de la partición FAT16. Puede obtener los archivos del sistema Nextor desde la distribución oficial o el repositorio. También necesita el archivo COMMAND2 para la shell de comandos:
+   1.  [Nextor Download Page](https://github.com/Konamiman/Nextor/releases)
+   2.  [Command2 Download Page](http://www.tni.nl/products/command2.html)
+4. Copie las ROMs MSX (`.ROM`) o imágenes de disco (`.DSK`) que desee usar con Nextor al directorio raíz de la memoria USB.
+5. Instale SofaRun u otro lanzador compatible con Nextor en la memoria USB si planea usarla para lanzar ROMs y DSKs. Puede descargar SofaRun desde su fuente oficial aquí: [SofaRun](https://www.louthrax.net/mgr/sofarun.html)
+6. Expulse la memoria USB de forma segura desde su PC.
+7. Conecte la memoria USB al cartucho PicoVerse 2040 usando un adaptador o cable OTG si es necesario.
+
+> **Nota:** No todas las memorias USB son compatibles con el cartucho PicoVerse 2040. Si encuentra problemas, pruebe con otra marca o modelo.
+>
+> **Nota:** Recuerde que Nextor necesita un mínimo de 128 KB de RAM para operar. Si usa el firmware Nextor estándar (-s1), asegúrese de que su MSX dispone de RAM suficiente.
 
 ## Ideas de mejora
-- Mejorar las heurísticas de detección de ROM para cubrir más mappers y casos límite.
-- Implementar pantalla de configuración para cada entrada ROM (nombre, anulación de mapper, etc).
-- Añadir soporte para más mappers de ROM.
-- Implementar un menú gráfico con mejor navegación e información de ROM.
-- Añadir soporte para guardar/cargar la configuración del menú para preservar preferencias.
+- Mejorar las heurísticas de detección de tipo de ROM para cubrir más mapeadores y casos límite.
+- Implementar una pantalla de configuración para cada entrada ROM (nombre, anulación de mapeador, etc.).
+- Añadir soporte para más mapeadores de ROM.
+- Implementar un menú gráfico con mejor navegación e información de las ROMs.
+- Añadir soporte para guardar/cargar la configuración del menú para preservar preferencias del usuario.
 - Soportar archivos DSK también, con entradas de configuración adecuadas.
-- Mejorar la detección de mappers para cubrir más casos.
-- Añadir soporte para slices de ROM de menú o temas personalizados.
-- Permitir descargar ROMs desde URLs e incrustarlas directamente.
-- Soporte inalámbrico (wifi) mediante módulo ESP-01 externo.
+- Añadir soporte para temas personalizados del menú.
+- Permitir la descarga de ROMs desde URLs de Internet e incrustarlas directamente.
 - Permitir el uso del joystick para navegar el menú.
-- Soporte para comprimir ROMs para ahorrar espacio.
 
 ## Problemas conocidos
 
 - La inclusión de la ROM Nextor embebida sigue siendo experimental y puede no funcionar en todos los modelos MSX2.
-- Algunas ROMs con mappers poco comunes pueden no detectarse correctamente y se omitirán a menos que se fuerce un mapper válido mediante etiqueta.
-- Actualmente la herramienta solo soporta ejecutables de Windows. No hay versiones para Linux o macOS.
-- La herramienta no valida la integridad de las ROMs más allá de tamaño y comprobaciones de cabecera básicas. ROMs corruptas pueden causar comportamientos inesperados.
-- El menú MultiROM no soporta archivos DSK; solo se listan y ejecutan ROMs.
-- La herramienta no soporta subdirectorios; solo procesa ROMs en el directorio de trabajo actual.
-- La memoria flash del Pico puede desgastarse tras muchos ciclos de escritura. Evite re‑flasheos excesivos.
+- Algunas ROMs con mapeadores poco comunes pueden no detectarse correctamente y serán omitidas a menos que se use una etiqueta de mapeador válida para forzar la detección.
+- La herramienta MultiROM actualmente solo soporta Windows. No hay versiones para Linux ni macOS por ahora.
+- La herramienta no valida actualmente la integridad de los archivos ROM más allá del tamaño y comprobaciones básicas de cabecera. ROMs corruptas pueden provocar comportamiento inesperado.
+- Debido a la naturaleza de la herramienta MultiROM (incrustar múltiples archivos en un único UF2), algunos antivirus pueden marcar el ejecutable como sospechoso. Esto es un falso positivo; asegúrese de descargar la herramienta desde una fuente de confianza.
+- El menú MultiROM no soporta archivos DSK; solo se listan y lanzan archivos ROM.
+- La herramienta no soporta actualmente subdirectorios; solo se procesan ROMs en el directorio de trabajo actual.
+- La memoria flash del Pico puede desgastarse tras muchos ciclos de escritura. Evite reflashear el cartucho en exceso.
 
 ## Modelos MSX probados
 
+El cartucho PicoVerse 2040 con firmware MultiROM se ha probado en los siguientes modelos MSX:
+
 | Modelo | Tipo | Estado | Comentarios |
 | --- | --- | --- | --- |
-| Adermir Carchano Expert 4 | MSX2+ | OK | Verificado |
-| Gradiente Expert | MSX1 | OK | Verificado |
-| JFF MSX | MSX1 | OK | Verificado |
-| MSX Book | MSX2+ (clon FPGA) | OK | Verificado |
-| MSX One | MSX1 | Not OK | Cartucho no reconocido |
-| National FS-4500 | MSX1 | OK | Verificado |
-| Panasonic FS-A1GT | TurboR | OK | Verificado |
-| Panasonic FS-A1ST | TurboR | OK | Verificado |
-| Panasonic FS-A1WX | MSX2+ | OK | Verificado |
-| Panasonic FS-A1WSX | MSX2+ | OK | Verificado |
-| Sharp HotBit HB8000 | MSX1 | OK | Verificado |
-| SMX-HB | MSX2+ (clon FPGA) | OK | Verificado |
-| Sony HB-F1XD | MSX2 | OK | Verificado |
-| Sony HB-F1XDJ | MSX2 | OK | Verificado |
-| Sony HB-F1XV | MSX2+ | OK | Verificado |
-| TRHMSX | MSX2+ (clon FPGA) | OK | Verificado |
-| uMSX | MSX2+ (clon FPGA) | OK | Verificado |
-| Yamaha YIS604 | MSX1 | OK | Verificado |
+| Adermir Carchano Expert 4 | MSX2+ | OK | Operación verificada |
+| Gradiente Expert | MSX1 | OK | Operación verificada |
+| JFF MSX | MSX1 | OK | Operación verificada |
+| MSX Book | MSX2+ (clon FPGA) | OK | Operación verificada |
+| MSX One | MSX1 | No OK | Cartucho no reconocido |
+| National FS-4500 | MSX1 | OK | Operación verificada |
+| Panasonic FS-A1GT | TurboR | OK | Operación verificada |
+| Panasonic FS-A1ST | TurboR | OK | Operación verificada |
+| Panasonic FS-A1WX | MSX2+ | OK | Operación verificada |
+| Panasonic FS-A1WSX | MSX2+ | OK | Operación verificada |
+| Sharp HotBit HB8000 | MSX1 | OK | Operación verificada |
+| SMX-HB | MSX2+ (clon FPGA) | OK | Operación verificada |
+| Sony HB-F1XD | MSX2 | OK | Operación verificada |
+| Sony HB-F1XDJ | MSX2 | OK | Operación verificada |
+| Sony HB-F1XV | MSX2+ | OK | Operación verificada |
+| TRHMSX | MSX2+ (clon FPGA) | OK | Operación verificada |
+| uMSX | MSX2+ (clon FPGA) | OK | Operación verificada |
+| Yamaha YIS604 | MSX1 | OK | Operación verificada |
 
-La versión Sunrise Nextor +240K ha sido probada en:
+El cartucho PicoVerse 2040 con firmware Sunrise Nextor +240K se ha probado en los siguientes modelos MSX:
 
-| Modelo | Estado | Comentarios |
-| --- | --- | --- |
-| MSX1 | | |
-| Sharp HotBit HB8000 (MSX1) | Not OK | El mapper de memoria no funciona y Nextor no es funcional |
-| MSX2+ | | |
-| TRHMSX (MSX2+, clon FPGA) | OK | Verificado |
-| uMSX (MSX2+, clon FPGA) | OK | Verificado |
+| Modelo | Tipo | Estado | Comentarios |
+| --- | --- | --- | --- |
+| Sharp HotBit HB8000 (MSX1) | MSX1| No OK | Mapeador de memoria no funciona, por tanto Nextor no funcional |
+| TRHMSX (MSX2+, clon FPGA) | MSX2+ | OK | Operación verificada |
+| uMSX (MSX2+, clon FPGA) | MSX2+ | OK | Operación verificada |
 
 Autor: Cristiano Almeida Goncalves
-Última actualización: 12/20/2025
+Última actualización: 21/12/2025

@@ -4,10 +4,9 @@
 |---|---|
 |![PicoVerse Front](/images/2025-12-02_20-05.png)|![PicoVerse Back](/images/2025-12-02_20-06.png)|
 
+The PicoVerse 2040 is a Raspberry Pi Pico based cartridge for MSX that uses replaceable firmware to extend the computer’s capabilities. By loading different firmware images, the cartridge can run MSX games and applications and emulate additional hardware devices (such as ROM mappers, extra RAM, or storage interfaces), effectively adding virtual peripherals to the MSX. One such firmware is the MultiROM system, which provides an on‑screen menu for browsing and launching multiple ROM titles stored in the cartridge.
 
-The PicoVerse 2040 is a Raspberry Pi Pico–based cartridge for MSX that uses replaceable firmware to extend the computer’s capabilities. By loading different firmware images, the cartridge can run MSX games and applications and emulate additional hardware devices (such as ROM mappers, extra RAM, or storage interfaces), effectively adding virtual peripherals to the MSX. One such firmware is the MultiROM system, which provides an on‑screen menu for browsing and launching multiple ROM titles stored in the cartridge.
-
-The cartridge can also expose the Pico’s USB‑C port as a mass‑storage device, allowing you to copy ROMs, DSKs, and other files directly from a computer to the cartridge.
+The cartridge can also expose the Pico’s USB‑C port as a mass‑storage device, allowing you to copy ROMs, DSKs, and other files directly from a PC with Windows or Linux to the cartridge.
 
 Additionally, you can use a Nextor firmware variant with +240 KB memory mapper support to take full advantage of the PicoVerse 2040 hardware on MSX systems with limited memory.
 
@@ -23,7 +22,9 @@ Those are the features available in the current version of the PicoVerse 2040 ca
 
 This section documents the `multirom` console tool used to generate UF2 images (`multirom.uf2`) that program the PicoVerse 2040 cartridge.
 
-In it default behavior, the `multirom` tool scans MSX ROM files in a directory and packages them into a single UF2 image that can be flashed to the Raspberry Pi Pico. The resulting image typically contains the Pico firmware, the MultiROM MSX menu ROM, a configuration area describing each ROM entry, and the ROM payloads themselves.
+In its default behavior, the `multirom` tool scans MSX ROM files in a directory and packages them into a single UF2 image that can be flashed to the Raspberry Pi Pico. The resulting image typically contains the Pico firmware, the MultiROM MSX menu ROM, a configuration area describing each ROM entry, and the ROM payloads themselves.
+
+> **Note:** A maximum of 128 ROMs can be included in a single image, with a total size limit of aproximately 16 MB.
 
 Depending on the options provided, `multirom` can also produce UF2 images that boot directly into a custom firmware instead of the MultiROM menu. For example, options can be used to produce UF2 files with a firmware that implements the Nextor OS. In this mode, the Pico’s USB‑C port can be used as a mass‑storage device for loading ROMs, DSKs, and other files from Nextor (for example, via SofaRun).
 
@@ -41,7 +42,9 @@ ROM file names are used to name the entries in the MSX menu. There is a limit of
 
 If you want to use Nextor with your PicoVerse 2040 cartridge you need to run the tool with the `-s1` or `-s2` option to include the embedded Nextor ROM in the image. The `-s1` option includes the standard Nextor ROM without memory mapper support, while `-s2` includes a Nextor ROM with +240 KB memory mapper support. The embedded Nextor ROM will be the single firmwware loaded at boot, and the MultiROM menu will not be available. You can then use SofaRun to load ROMs and DSKs from the Pico's USB mass storage.
 
-**Important Note:** To use a USB thumdrive you may need a OTG adapter or cable. That can be used to convert the USB-C port to a standard USB-A female port.
+> **Note:** To use a USB thumdrive you may need a OTG adapter or cable. That can be used to convert the USB-C port to a standard USB-A female port.
+
+> **Note:** The `-n` option includes an experimental embedded Nextor ROM that works on specific MSX2 models. This version uses a different communication method (IO port based) and may not work on all systems.
 
 ## Command-line usage
 
@@ -60,7 +63,7 @@ multirom.exe [options]
 - `-s1`            : Cartridge boots with Sunrise IDE Nextor (no memory mapper).
 - `-s2`            : Cartridge boots with Sunrise IDE Nextor (+240 KB memory mapper).
 - If neither `-s1` nor `-s2` is specified, the tool produces a MultiROM image with the menu.
-- If you need to force a specific mapper type for a ROM file, you can append a mapper tag before the `.ROM` extension in the filename. The tag is case-insensitive. For example, naming a file `Knight Mare.PL-32.ROM` forces the use of the PL-32 mapper for that ROM. Tags like `SYSTEM` are ignored.
+- If you need to force a specific mapper type for a ROM file, you can append a mapper tag before the `.ROM` extension in the filename. The tag is case-insensitive. For example, naming a file `Knight Mare.PL-32.ROM` forces the use of the PL-32 mapper for that ROM. Tags like `SYSTEM` are ignored. The list of possible tags that can be used is: `PL-16,  PL-32,  KonSCC,  Linear,  ASC-08,  ASC-16,  Konami,  NEO-8,  NEO-16`
 
 ### Examples
 - Produces the multirom.uf2 file with the MultiROM menu and all `.ROM` files in the current directory. You can run the tool using the command prompt or just by double-clicking the executable:
@@ -102,6 +105,8 @@ multirom.exe [options]
 
 When you power on the MSX with the PicoVerse 2040 cartridge inserted, the MultiROM menu appears, showing the list of available ROMs. You can navigate the menu using the keyboard arrow keys.
 
+![alt text](/images/multirom_2040_menu.png)
+
 Use the Up and Down arrow keys to move the selection cursor through the list of ROMs. If you have more than 19 ROMs, use the lateral arrow keys (Left and Right) to scroll through pages of entries.
 
 Press the Enter or Space key to launch the selected ROM. The MSX will attempt to boot the ROM using the appropriate mapper settings.
@@ -110,13 +115,13 @@ At any time while in the menu, you can press H key read the help screen with bas
 
 ## Using Nextor with the PicoVerse 2040 cartridge
 
-If you flashed the cartridge with a Nextor firmware (using the `-s1` or `-s2` options), the cartridge will boot directly into Nextor instead of the MultiROM menu. Those options communicate with the MSX using memory-mapped I/O thus requiring the cartridge to be inserted into a standard cartridge slot. 
+If you flashed the cartridge with a Nextor firmware (using the `-s1` or `-s2` options), the cartridge will boot directly into Nextor instead of the MultiROM menu. Those options communicate with the MSX using memory-mapped I/O thus requiring the cartridge to be inserted into a primary cartridge slot. 
 
 Once Nextor is running, you can use SofaRun or any other Nextor-compatible launcher to load ROMs and DSKs from the Pico's USB mass-storage device. You may need a USB OTG adapter or cable to connect standard USB-A thumb drives to the cartridge's USB-C port.
 
-In MSX2 or MSX2+ systems with the +240 KB memory version of Nextor (S2 option), the cartridge will add the extra memory to the system and the BIOS sequence will reflect the increased RAM. Some MSX models display the total expanded memory during boot.
+In MSX2 or MSX2+ systems, with the +240 KB memory version of Nextor (-S2 option), the cartridge will add the extra memory to the system and the BIOS sequence will reflect the increased RAM. Some MSX models display the total expanded memory during boot.
 
-The -n option of the multirom tool includes an experimental embedded Nextor ROM that can be used on specific MSX2 models. However, this option is still under development and may not work on all systems. This version uses a different method (IO port based) to communicate with the MSX, allowing it to work on systems where the cartridge slot is not standard/expanded. 
+The -n option of the multirom tool includes an experimental embedded Nextor ROM that can be used on specific MSX2 models. However, this option is still under development and may not work on all systems. This version uses a different method (IO port based) to communicate with the MSX, allowing it to work on systems where the cartridge slot is not primary, for example with slot expanders. 
 
 More details on the protocol used to communicate with the MSX computer can be found in the Nextor-Pico-Bridge-Protocol.md document. The details of the communication with the Sunrise IDE Nextor firmware can be found in the Sunrise-Nextor.md document.
 
@@ -125,13 +130,18 @@ More details on the protocol used to communicate with the MSX computer can be fo
 To prepare a USB thumb drive for use with Nextor on the PicoVerse 2040 cartridge, follow these steps:
 
 1. Connect the USB thumb drive to your PC.
-2. Create a 4GB maximum FAT16 partition on the thumb drive. You can use built-in OS tools or third-party partitioning software to do this.
+2. Create a 4GB maximum FAT16 partition on the thumb drive. You can use built-in Nextor OS tool (CALL FDISK while in MSX Basic) or third-party partitioning software to do this.
 3. Copy the Nextor system files to the root directory of the FAT16 partition. You can obtain the Nextor system files from the official Nextor distribution or repository. You also need the COMMAND2 file for the command shell:
    1.  [Nextor Download Page](https://github.com/Konamiman/Nextor/releases) 
    2.  [Command2 Download Page](http://www.tni.nl/products/command2.html)
 4. Copy any MSX ROMs (`.ROM` files) or disk images (`.DSK` files) you want to use with Nextor to the root directory of the thumb drive.
 5. Install SofaRun or any other Nextor-compatible launcher on the thumb drive if you plan to use it for launching ROMs and DSKs. You can download SofaRun from its official source here: [SofaRun](https://www.louthrax.net/mgr/sofarun.html)
 6. Safely eject the thumb drive from your PC.
+7. Connect the thumb drive to the PicoVerse 2040 cartridge using a USB OTG adapter or cable if necessary.
+
+> **Note:** Not all USB thumb drives are compatible with the PicoVerse 2040 cartridge. If you encounter issues, try using a different brand or model of thumb drive.
+>
+> **Note:** Remember Nextor needs a minimum of 128 KB of RAM to operate. If you are using the standard Nextor firmware (-s1 option), ensure your MSX has enough RAM available.
 
 ## Improvements ideas
 - Improve the ROM type detection heuristics to cover more mappers and edge cases.
@@ -140,22 +150,20 @@ To prepare a USB thumb drive for use with Nextor on the PicoVerse 2040 cartridge
 - Implement a graphical menu with better navigation and ROM information display.
 - Add support for saving/loading menu configuration to preserve user preferences.
 - Support DSK files as well, with proper configuration entries.
-- Improve mapper detection heuristics to cover more mappers.
-- Add support for custom menu ROM slices or themes.
+- Add support for custom themes for the menu.
 - Allow downloading ROMs from Internet URLs and embedding them directly.
-- Wireless (wifi) network support via external ESP-01 module.
 - Allow the use of the joystick to navigate the menu.
-- Support for zipping/compressing ROMs to save space.
 
 ## Known issues
 
 - The embedded Nextor ROM inclusion is still experimental and may not work on all MSX2 models.
 - Some ROMs with uncommon mappers may not be detected correctly and will be skipped unless a valid mapper tag is used to force detection.
-- The tool currently only supports Windows executables. Linux and macOS versions are not available yet.
+- The MultiROM tool currently only supports Windows. Linux and macOS versions are not available yet.
 - The tool does not currently validate the integrity of ROM files beyond size and basic header checks. Corrupted ROMs may lead to unexpected behavior.
+- Due to the nature of MultiROM tool (embedding multiple files into a single UF2), some antivirus software may flag the executable as suspicious. This is a false positive; ensure you download the tool from a trusted source.
 - The MultiROM menu does not support DSK files; only ROM files are listed and launched.
 - The tool does not currently support subdirectories; only ROM files in the current working directory are processed.
-- The pico flash memory can wear out after many write cycles. Avoid excessive re-flashing.
+- The pico flash memory can wear out after many write cycles. Avoid excessive re-flashing of the cartridge.
 
 ## Tested MSX models
 
@@ -184,11 +192,11 @@ The PicoVerse 2040 cartridge with MultiROM firmware has been tested on the follo
 
 The PicoVerse 2040 cartridge with Sunrise Nextor +240K firmware has been tested on the following MSX models:
 
-| Model | Status | Comments |
-| --- | --- | --- |
-|MSX1|||
-| Sharp HotBit HB8000 (MSX1) | Not OK | Memory mapper not working then Nextor not functional |
-|MSX2+|||
-| TRHMSX (MSX2+, FPGA clone) | OK | Verified operation |
-| uMSX (MSX2+, FPGA clone) | OK | Verified operationAuthor: Cristiano Almeida Goncalves
-Last updated: 12/20/2025
+| Model | Type | Status | Comments |
+| --- | --- | --- | --- |
+| Sharp HotBit HB8000 (MSX1) | MSX1| Not OK | Memory mapper not working then Nextor not functional |
+| TRHMSX (MSX2+, FPGA clone) | MSX2+ |  OK | Verified operation |
+| uMSX (MSX2+, FPGA clone) | MSX2+ | OK | Verified operation
+
+Author: Cristiano Almeida Goncalves
+Last updated: 12/21/2025
