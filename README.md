@@ -19,6 +19,7 @@ PicoVerse is a community-driven effort to build versatile MSX cartridges powered
 - [Guía MultiROM PicoVerse 2040, versión en español](/docs/msx-picoverse-2040-multirom-tool-manual.es-ES.md)
 - [PicoVerse 2040 Features Overview](/docs/msx-picoverse-2040-features.md)
 - [PicoVerse 2350 Features Overview](/docs/msx-picoverse-2350-features.md)
+- [Nextor Pico Bridge Protocol](/docs/Nextor-Pico-Bridge-Protocol.md)
 
 ## Hardware Variants
 
