@@ -668,16 +668,12 @@ void launch_wifi_config(void) {
 
 // wait_for_key_with_scroll - Wait for a key press with scrolling effect
 // This function will wait for a key press and return the key code. While waiting, it
-static int wait_for_key_with_scroll(const char *name, unsigned int row)
+static int wait_for_key_with_scroll(void)
 {
     volatile unsigned int *jiffyPtr = (volatile unsigned int *)JIFFY;
     unsigned int lastTick = *jiffyPtr;
     int startPos = 0;
-    size_t len = strlen(name);
-    int shouldScroll = use_80_columns ? (len >= name_col_width) : (len > name_col_width);
     const unsigned int scrollDelay = 30U; // 0.5 seconds at 60 Hz
-    unsigned char row_width = menu_ui_row_width();
-    unsigned char highlight_width = menu_ui_highlight_width();
     char row_text[81];
     char name_window[MAX_FILE_NAME_LENGTH + 1];
 
@@ -691,22 +687,19 @@ static int wait_for_key_with_scroll(const char *name, unsigned int row)
         }
 
         // handle scrolling
-        if (shouldScroll) {
-            unsigned int now = *jiffyPtr; // read current jiffy count
-            if ((unsigned int)(now - lastTick) >= scrollDelay) {
+        if (totalFiles > 0) {
+            ROMRecord *record = &records[currentIndex % FILES_PER_PAGE];
+            size_t len = strlen(record->Name);
+            if (!record_is_folder(record) && (use_80_columns ? (len >= name_col_width) : (len > name_col_width)) && (unsigned int)(*jiffyPtr - lastTick) >= scrollDelay) {
                 int attempts = 0;
                 int printed = 0;
                 int lenInt = (int)len;
 
                 while (attempts < lenInt && !printed) {
-                    printed = build_sliding_name_window(name, startPos, name_window, name_col_width);
+                    printed = build_sliding_name_window(record->Name, startPos, name_window, name_col_width);
                     if (printed) {
-                        build_menu_row_text(&records[currentIndex % FILES_PER_PAGE], name_window, row_text, row_width);
-                        Locate(0, row);
-                        PrintChar('>');
-                        if (highlight_width > 1) {
-                            menu_ui_print_str_inverted_width(row_text + 1, (unsigned char)(highlight_width - 1));
-                        }
+                        build_menu_row_text(record, name_window, row_text, menu_ui_row_width());
+                        menu_ui_render_selectable_line((unsigned char)((currentIndex % FILES_PER_PAGE) + 2), row_text + 1, 1);
                     }
                     startPos++;
                     if (startPos >= lenInt + 1) {
@@ -714,7 +707,7 @@ static int wait_for_key_with_scroll(const char *name, unsigned int row)
                     }
                     attempts++;
                 }
-                lastTick = now;
+                lastTick = *jiffyPtr;
             }
         }
 
@@ -912,7 +905,7 @@ void navigateMenu()
 
         unsigned int currentRow = (currentIndex%FILES_PER_PAGE) + 2;
 
-        key = wait_for_key_with_scroll(records[currentIndex % FILES_PER_PAGE].Name, currentRow);
+        key = wait_for_key_with_scroll();
         //key = KeyboardRead();
         //key = InputChar();
         char fkey = Fkeys();

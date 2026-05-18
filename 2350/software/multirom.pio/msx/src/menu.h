@@ -46,7 +46,6 @@ char* mapper_description(int number);
 void charMap(); //debug
 void displayMenu();
 void navigateMenu();
-void configMenu();
 void helpMenu();
 void loadGame(int index);
 void main();

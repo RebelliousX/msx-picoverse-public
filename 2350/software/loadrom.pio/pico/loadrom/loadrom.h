@@ -82,7 +82,23 @@ typedef struct {
 #define SCC_FLAG        0x80u   // Bit flag in rom_type for SCC emulation
 #define SCC_PLUS_FLAG   0x40u   // Bit flag in rom_type for SCC+ (enhanced) emulation
 #define WIFI_FLAG       0x20u   // Bit flag in rom_type for Sunrise WiFi system ROM + memio UART
+#define MSX_MUSIC_FLAG  0x20u   // Non-SYSTEM ROM flag for MSX-MUSIC/YM2413 emulation
+#define DUAL_PSG_FLAG   0x10u   // Bit flag in rom_type for Carnivore2-style secondary PSG emulation
 #define WIFI_ROM_SIZE   16384u  // ESP8266P system ROM size appended after the Sunrise ROM payload
+#define FMPAC_BIOS_SIZE 65536u  // FM-PAC BIOS ROM size appended after the external ROM payload
+
+// Dual PSG emulation constants
+#define PSG_SAMPLE_RATE 44100
+#define PSG_CLOCK       1789773
+#define PSG_VOLUME_SHIFT 2
+#define PSG_PORT_REG    0x10u
+#define PSG_PORT_DATA   0x11u
+
+// MSX-MUSIC / YM2413 emulation constants
+#define MSX_MUSIC_SAMPLE_RATE 44100
+#define MSX_MUSIC_CLOCK       3579545
+#define MSX_MUSIC_PORT_REG    0x7Cu
+#define MSX_MUSIC_PORT_DATA   0x7Du
 
 // ESP-01 pins on the RP2350 WiFi hardware variant
 // Per the Waveshare CORE2350B PCB schematic:

@@ -5,8 +5,8 @@
 // menu.c - MSX ROM with the menu program for the MSX PICOVERSE 2040 project
 //
 // This program will display a menu with the games stored on the flash memory. The user can navigate the menu using the arrow keys and select a game to load. 
-// The program will display the game name, size and mapper type. The user can also display a help screen with the available keys and a configuration screen 
-// to change the settings of the program. The program will read the flash memory configuration area to populate the game list. The configuration area will 
+// The program will display the game name, size and mapper type. The user can also display a help screen with the available keys.
+// The program will read the flash memory configuration area to populate the game list. The configuration area will 
 // contain the game name, size, mapper type and offset in the flash memory.
 // 
 // The program needs to be compiled using the Fusion-C library and the MSX BIOS routines. 
@@ -20,6 +20,13 @@
 #ifndef MULTIROM_VERSION
 #define MULTIROM_VERSION "v1.00"
 #endif
+
+#define MENU_HLINE_SOURCE_CHAR 0x17
+#define MENU_HLINE_PRINT_CHAR  0x7E
+#define MENU_SEPARATOR_WIDTH   37
+
+static void copy_separator_char_pattern(void);
+static void print_separator_line(void);
 
 // read_ulong - Read a 4-byte value from the memory area
 // This function will read a 4-byte value from the memory area pointed by ptr and return the value as an unsigned long
@@ -146,6 +153,23 @@ clear_loop:
     or c
     jp nz, clear_loop ; Repeat until all bytes are cleared
     __endasm;
+}
+
+static void copy_separator_char_pattern(void)
+{
+    unsigned int sourceAddress = 0x0800 + ((unsigned int)MENU_HLINE_SOURCE_CHAR * 8);
+    unsigned int targetAddress = 0x0800 + ((unsigned int)MENU_HLINE_PRINT_CHAR * 8);
+
+    for (unsigned char i = 0; i < 8; i++) {
+        Vpoke(targetAddress + i, Vpeek(sourceAddress + i));
+    }
+}
+
+static void print_separator_line(void)
+{
+    for (unsigned char i = 0; i < MENU_SEPARATOR_WIDTH; i++) {
+        PrintChar(MENU_HLINE_PRINT_CHAR);
+    }
 }
 
 // invert_chars - Invert the characters in the character table
@@ -417,6 +441,7 @@ void displayMenu() {
     //Cls(); // for some reason is not working here
     //clear_screen_0(); // works but reset the char table
     Screen(0);
+    copy_separator_char_pattern();
     invert_chars(32, 126); // Invert the characters from 32 to 126
     //FunctionKeys(1); // Disable the function keys
 
@@ -424,7 +449,7 @@ void displayMenu() {
     Locate(0, 0);
     printf("MSX PICOVERSE 2040   [MultiROM %s]", MULTIROM_VERSION);
     Locate(0, 1);
-    printf("-------------------------------------");
+    print_separator_line();
     unsigned int startIndex = (currentPage - 1) * FILES_PER_PAGE;
     unsigned int endIndex = startIndex + FILES_PER_PAGE;
 
@@ -446,9 +471,9 @@ void displayMenu() {
     }
     // footer
     Locate(0, 21);
-    printf("-------------------------------------");
+    print_separator_line();
     Locate(0, 22);
-    printf("Page: %02d/%02d                [H - Help]",currentPage, totalPages); // Print the page number and the help and config options
+    printf("Page: %02d/%02d                [H - Help]",currentPage, totalPages); // Print the page number and the help option
     if (totalFiles > 0) {
         Locate(0, (currentIndex % FILES_PER_PAGE) + 2); // Position the cursor on the selected file
         printf(">"); // Print the cursor
@@ -457,35 +482,17 @@ void displayMenu() {
     }
 }
 
-// configMenu - Display the configuration menu on the screen
-// This function will display the configuration menu on the screen. 
-void configMenu()
-{
-    Cls(); // Clear the screen
-    Locate(0,0);
-    printf("MSX PICOVERSE 2040   [MultiROM %s]", MULTIROM_VERSION);
-    Locate(0, 1);
-    printf("-------------------------------------");
-    Locate(0, 2);
-    Locate(0, 21);
-    printf("-------------------------------------");
-    Locate(0, 22);
-    printf("Press any key to return to the menu!");
-    InputChar();
-    displayMenu();
-    navigateMenu();
-}
-
 // helpMenu - Display the help menu on the screen
 // This function will display the help menu on the screen. It will print the help information and the keys to navigate the menu.
 void helpMenu()
 {
     
     Cls(); // Clear the screen
+    copy_separator_char_pattern();
     Locate(0,0);
     printf("MSX PICOVERSE 2040   [MultiROM %s]", MULTIROM_VERSION);
     Locate(0, 1);
-    printf("-------------------------------------");
+    print_separator_line();
     Locate(0, 2);
     printf("Use [UP]  [DOWN] to navigate the menu");
     Locate(0, 3);
@@ -497,7 +504,7 @@ void helpMenu()
     Locate(0, 6);
     printf("Press [H] to display the help screen");
     Locate(0, 21);
-    printf("-------------------------------------");
+    print_separator_line();
     Locate(0, 22);
     printf("Press any key to return to the menu!");
     InputChar();
@@ -549,7 +556,7 @@ void loadGame(int index)
 
 // navigateMenu - Navigate the menu
 // This function will navigate the menu. It will wait for the user to press a key and then act based on the key pressed. The user can navigate the menu using the arrow keys
-// to move up and down the files, left and right to move between pages, enter to load the game, H to display the help screen and C to display the config screen.
+// to move up and down the files, left and right to move between pages, enter to load the game, and H to display the help screen.
 // The function will update the current page and current index based on the key pressed and display the menu again.
 void navigateMenu() 
 {
@@ -615,11 +622,6 @@ void navigateMenu()
             case 104: // h - Help (lowercase h)
                 // Help
                 helpMenu(); // Display the help menu
-                break;
-            case 99: // C - Config (uppercase C)
-            case 67: // c - Config (lowercase c)
-                // Config
-                configMenu(); // Display the config menu
                 break;
             case 13: // Enter
             case 32: // Space

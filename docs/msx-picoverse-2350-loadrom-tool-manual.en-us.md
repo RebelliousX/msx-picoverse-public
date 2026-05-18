@@ -8,7 +8,7 @@ For RP2350, the current LoadROM package is:
 
 - `2350/software/loadrom.pio`.
 
-> **Important:** SCC/SCC+ emulation options (`-scc`, `-sccplus`) are supported by the current RP2350 LoadROM package (`2350/software/loadrom.pio`).
+> **Important:** SCC/SCC+ emulation options (`-scc`, `-sccplus`), the secondary AY-3-8910 dual PSG option (`-d`), and the MSX-MUSIC/YM2413 option (`-f` or `-fmpac`) are supported by the current RP2350 LoadROM package (`2350/software/loadrom.pio`). Exactly one on-cartridge audio mode can be active per UF2 image.
 
 ---
 
@@ -49,10 +49,18 @@ loadrom.exe [options] [romfile]
 - `-w`, `--wifi` : Enable ESP-01 WiFi support for `-s1`, `-m1`, `-s2`, or `-m2`. This adds the ESP8266P system ROM plus a memory-mapped UART backend expected by the WiFi ROM/software stack.
 - `-scc`, `--scc` : Enable SCC (standard) sound emulation. For embedded ROM builds, this applies to Konami SCC or Manbow2 mapper ROMs. With `-c1` or `-c2`, it enables SCC playback for Konami SCC ROMs uploaded later through `SROM.COM /D15`.
 - `-sccplus`, `--sccplus` : Enable SCC+ (enhanced) sound emulation. For embedded ROM builds, this applies to Konami SCC or Manbow2 mapper ROMs. With `-c1` or `-c2`, it enables SCC+ playback for compatible ROMs uploaded later through `SROM.COM /D15`.
+- `-d`, `--dual-psg` : Enable secondary AY-3-8910 (PSG) emulation on I/O ports `0x10` (register select) and `0x11` (data). The Pico captures `OUT (0x10/0x11),A` writes via PIO1 and streams a mixed signal to the I2S DAC alongside the host MSX's PSG. Only valid with external ROM files whose mapper is not Konami SCC or Manbow2 (those mappers carry an on-cartridge SCC chip and reserve the second audio slot for SCC emulation).
+- `-f`, `-fmpac` : Enable MSX-MUSIC / YM2413 emulation on I/O ports `0x7C` (register select) and `0x7D` (data). The Pico captures OPLL writes via PIO1 and streams the generated FM audio to the I2S DAC. The UF2 also embeds the FM-PAC BIOS and exposes it in an expanded FM-PAC subslot so ROMs that use MSX-MUSIC BIOS calls can find it. Only valid with non-SYSTEM external ROM files.
 - `-o <filename>`, `--output <filename>` : Override the UF2 output name (default `loadrom.uf2`).
 - Positional argument: the ROM file to embed. Required for normal ROM loading; not accepted with `-s1`/`-m1`/`-s2`/`-m2`/`-c1`/`-c2`.
 
-`-s1`, `-m1`, `-s2`, `-m2`, `-c1`, and `-c2` are mutually exclusive. `-w` is valid only with `-s1`, `-m1`, `-s2`, or `-m2`. `-scc` and `-sccplus` are mutually exclusive. If conflicting options are provided, the tool exits with an error.
+`-s1`, `-m1`, `-s2`, `-m2`, `-c1`, and `-c2` are mutually exclusive. `-w` is valid only with `-s1`, `-m1`, `-s2`, or `-m2`. The audio options `-scc`, `-sccplus`, `-d`, and `-f`/`-fmpac` are mutually exclusive — only one on-cartridge audio engine can be active per UF2 image. `-d` is additionally rejected for Konami SCC and Manbow2 ROMs, while `-d` and `-f`/`-fmpac` are rejected for the embedded Sunrise/Carnivore2 system modes. If conflicting options are provided, the tool exits with an error.
+
+For the firmware architecture behind `-d`, see the [PicoVerse 2350 Dual PSG implementation guide](./msx-picoverse-2350-dualpsg.md).
+
+When `-f` or `-fmpac` is selected, LoadROM keeps the selected game mapper active and adds the FM-PAC BIOS/register area in the cartridge's expanded slot layout. The Pico responds to both direct YM2413 I/O writes and FM-PAC memory-mapped register writes at `0x7FF4`/`0x7FF5`.
+
+For the firmware architecture behind `-f` / `-fmpac`, see the [PicoVerse 2350 MSX-MUSIC / FM-PAC implementation guide](./msx-picoverse-2350-fmpac.md).
 
 ### Mapper forcing via filename tags
 
@@ -144,6 +152,15 @@ Tags are case-insensitive. If no valid tag is present, the tool first computes t
    loadrom.exe -scc "Space Manbow.rom"
    loadrom.exe -sccplus "Snatcher.KonSCC.rom"
    ```
+   Dual PSG example (secondary AY-3-8910 on ports `0x10`/`0x11`):
+   ```
+   loadrom.exe -d "Penguin Adventure - 2 x PSG - Darky.rom"
+   ```
+   MSX-MUSIC example (YM2413 on ports `0x7C`/`0x7D`):
+   ```
+   loadrom.exe -f "Game with MSX-MUSIC.rom"
+   loadrom.exe -fmpac "Game with FM music.rom"
+   ```
 4. Review the console output (name, size, mapper, and flash offset).
 5. Hold BOOTSEL while connecting the PicoVerse 2350 to USB.
 6. Copy the generated UF2 to the `RPI-RP2` drive.
@@ -162,11 +179,12 @@ The UF2 image contains:
 1. **Firmware blob** – embedded `loadrom` firmware.
 2. **Configuration record** (59 bytes):
    - 50 bytes: ROM name (ASCII, padded/truncated).
-   - 1 byte : mapper ID and optional SCC/SCC+ flags:
+   - 1 byte : mapper ID plus optional audio/WiFi flags:
      - Bit 7 (`0x80`) = SCC emulation enabled.
      - Bit 6 (`0x40`) = SCC+ emulation enabled.
-       - Bit 5 (`0x20`) = WiFi support enabled for Sunrise IDE modes.
-     - Bits 0..5 = base mapper ID.
+   - Bit 5 (`0x20`) = WiFi support enabled for Sunrise IDE modes, or MSX-MUSIC/YM2413 enabled for non-SYSTEM ROMs.
+     - Bit 4 (`0x10`) = Dual PSG emulation enabled (secondary AY-3-8910 on ports `0x10`/`0x11`).
+     - Bits 0..3 = base mapper ID.
    - 4 bytes: ROM size (little-endian).
    - 4 bytes: ROM flash offset (little-endian).
 3. **ROM payload** – raw ROM data appended after the config record.

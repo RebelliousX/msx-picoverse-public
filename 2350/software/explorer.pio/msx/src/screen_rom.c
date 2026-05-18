@@ -17,7 +17,9 @@ static void render_rom_action_line(unsigned char row, int selected);
 static void render_rom_footer_line(const char *left_text);
 static const char *footer_text_for_selection(int selection, unsigned char allow_mapper_override, int wifi_selection);
 static void build_mapper_text(const ROMRecord *record, int waiting_mapper, char *out, size_t out_size);
-static void build_audio_text(const ROMRecord *record, unsigned char audio_index, char *out, size_t out_size);
+static void build_audio_text(const ROMRecord *record, unsigned char audio_profile, char *out, size_t out_size);
+static unsigned char sanitize_audio_profile(const ROMRecord *record, unsigned char audio_profile);
+static unsigned char next_audio_profile(const ROMRecord *record, unsigned char audio_profile, int dir);
 
 static unsigned char record_is_system_rom(const ROMRecord *record) {
     unsigned char mapper_code = record_mapper_code(record->Mapper);
@@ -27,6 +29,15 @@ static unsigned char record_is_system_rom(const ROMRecord *record) {
 static unsigned char record_is_wifi_capable_system_rom(const ROMRecord *record) {
     unsigned char mapper_code = record_mapper_code(record->Mapper);
     return mapper_code == 10 || mapper_code == 11 || mapper_code == 15 || mapper_code == 16;
+}
+
+static unsigned char record_supports_scc_audio(const ROMRecord *record) {
+    unsigned char mapper_code = record_mapper_code(record->Mapper);
+    return mapper_code == 3 || mapper_code == 14;
+}
+
+static unsigned char record_supports_dual_psg(const ROMRecord *record) {
+    return !record_is_folder(record) && !record_is_system_rom(record) && !record_supports_scc_audio(record);
 }
 
 static void send_detect_mapper(unsigned int index) {
@@ -112,7 +123,7 @@ void show_rom_screen(unsigned int index) {
     unsigned char waiting_mapper = 0;
     char mapper_text[48];
     char audio_text[32];
-    unsigned char audio_index = 0;
+    unsigned char audio_profile = AUDIO_PROFILE_NONE;
     unsigned char allow_mapper_override = !record_is_system_rom(record);
     unsigned char allow_wifi_support = record_is_wifi_capable_system_rom(record);
     unsigned char wifi_enabled = 0;
@@ -134,18 +145,19 @@ void show_rom_screen(unsigned int index) {
             }
             send_detect_mapper(index);
             waiting_mapper = 1;
-        } else if (mapper_code == 3 || mapper_code == 14) {
-            audio_index = 1;
+        } else if (record_supports_scc_audio(record)) {
+            audio_profile = AUDIO_PROFILE_SCC;
         }
     } else {
-        unsigned char mapper_code = record_mapper_code(record->Mapper);
-        if (mapper_code == 3 || mapper_code == 14) {
-            audio_index = 1;
+        if (record_supports_scc_audio(record)) {
+            audio_profile = AUDIO_PROFILE_SCC;
         }
     }
 
+    audio_profile = sanitize_audio_profile(record, audio_profile);
+
     build_mapper_text(record, waiting_mapper, mapper_text, sizeof(mapper_text));
-    build_audio_text(record, audio_index, audio_text, sizeof(audio_text));
+    build_audio_text(record, audio_profile, audio_text, sizeof(audio_text));
     render_rom_mapper_line(mapper_text, selection == 0);
     render_rom_audio_line(audio_text, selection == 1);
     if (allow_wifi_support) {
@@ -165,7 +177,7 @@ void show_rom_screen(unsigned int index) {
                 helpMenu();
                 render_rom_screen(record);
                 build_mapper_text(record, waiting_mapper, mapper_text, sizeof(mapper_text));
-                build_audio_text(record, audio_index, audio_text, sizeof(audio_text));
+                build_audio_text(record, audio_profile, audio_text, sizeof(audio_text));
                 render_rom_mapper_line(mapper_text, selection == 0);
                 render_rom_audio_line(audio_text, selection == 1);
                 if (allow_wifi_support) {
@@ -179,7 +191,8 @@ void show_rom_screen(unsigned int index) {
             }
             if (key == 13) {
                 if (!waiting_mapper && selection == action_selection) {
-                    Poke(CTRL_AUDIO, audio_index);
+                    audio_profile = sanitize_audio_profile(record, audio_profile);
+                    Poke(CTRL_AUDIO, audio_profile);
                     Poke(CTRL_WIFI_SUPPORT, allow_wifi_support ? wifi_enabled : 0);
                     loadGame((int)index);
                     return;
@@ -196,7 +209,7 @@ void show_rom_screen(unsigned int index) {
                 if (selection != next) {
                     selection = next;
                     build_mapper_text(record, waiting_mapper, mapper_text, sizeof(mapper_text));
-                    build_audio_text(record, audio_index, audio_text, sizeof(audio_text));
+                    build_audio_text(record, audio_profile, audio_text, sizeof(audio_text));
                     render_rom_mapper_line(mapper_text, selection == 0);
                     render_rom_audio_line(audio_text, selection == 1);
                     if (allow_wifi_support) {
@@ -232,22 +245,17 @@ void show_rom_screen(unsigned int index) {
                 unsigned char next_mapper = mapper_cycle[next_index];
                 if (send_set_mapper(index, next_mapper)) {
                     record->Mapper = (record->Mapper & (SOURCE_SD_FLAG | FOLDER_FLAG)) | OVERRIDE_FLAG | next_mapper;
+                    audio_profile = sanitize_audio_profile(record, audio_profile);
                     build_mapper_text(record, waiting_mapper, mapper_text, sizeof(mapper_text));
+                    build_audio_text(record, audio_profile, audio_text, sizeof(audio_text));
                     render_rom_mapper_line(mapper_text, selection == 0);
+                    render_rom_audio_line(audio_text, selection == 1);
                 }
             }
             if ((key == 28 || key == 29) && selection == 1) {
-                static const unsigned char audio_cycle[] = {0, 1, 2};
-                const unsigned int audio_count = (unsigned int)(sizeof(audio_cycle) / sizeof(audio_cycle[0]));
                 int dir = (key == 28) ? 1 : -1;
-                int next_index = (int)audio_index + dir;
-                if (next_index < 0) {
-                    next_index = (int)(audio_count - 1);
-                } else if ((unsigned int)next_index >= audio_count) {
-                    next_index = 0;
-                }
-                audio_index = audio_cycle[next_index];
-                build_audio_text(record, audio_index, audio_text, sizeof(audio_text));
+                audio_profile = next_audio_profile(record, audio_profile, dir);
+                build_audio_text(record, audio_profile, audio_text, sizeof(audio_text));
                 render_rom_audio_line(audio_text, selection == 1);
             }
             if ((key == 28 || key == 29) && allow_wifi_support && selection == wifi_selection) {
@@ -258,7 +266,7 @@ void show_rom_screen(unsigned int index) {
                 if (menu_ui_try_toggle_columns()) {
                     render_rom_screen(record);
                     build_mapper_text(record, waiting_mapper, mapper_text, sizeof(mapper_text));
-                    build_audio_text(record, audio_index, audio_text, sizeof(audio_text));
+                    build_audio_text(record, audio_profile, audio_text, sizeof(audio_text));
                     render_rom_mapper_line(mapper_text, selection == 0);
                     render_rom_audio_line(audio_text, selection == 1);
                     if (allow_wifi_support) {
@@ -274,14 +282,16 @@ void show_rom_screen(unsigned int index) {
             unsigned char mapper = read_mapper_value();
             if (mapper != 0) {
                 record->Mapper = (record->Mapper & (SOURCE_SD_FLAG | FOLDER_FLAG)) | mapper;
-                if ((mapper == 3 || mapper == 14) && audio_index == 0) {
-                    audio_index = 1;
-                    build_audio_text(record, audio_index, audio_text, sizeof(audio_text));
-                    render_rom_audio_line(audio_text, selection == 1);
-                }
             } else {
                 record->Mapper = (record->Mapper & (SOURCE_SD_FLAG | FOLDER_FLAG));
             }
+            if (audio_profile == AUDIO_PROFILE_NONE && record_supports_scc_audio(record)) {
+                audio_profile = AUDIO_PROFILE_SCC;
+            } else {
+                audio_profile = sanitize_audio_profile(record, audio_profile);
+            }
+            build_audio_text(record, audio_profile, audio_text, sizeof(audio_text));
+            render_rom_audio_line(audio_text, selection == 1);
             waiting_mapper = 0;
             build_mapper_text(record, waiting_mapper, mapper_text, sizeof(mapper_text));
             render_rom_mapper_line(mapper_text, selection == 0);
@@ -443,16 +453,80 @@ static void build_mapper_text(const ROMRecord *record, int waiting_mapper, char 
     }
 }
 
-static void build_audio_text(const ROMRecord *record, unsigned char audio_index, char *out, size_t out_size) {
-    (void)record;
-    const char *audio_labels[] = {"None", "SCC", "SCC+"};
-    const unsigned int audio_count = (unsigned int)(sizeof(audio_labels) / sizeof(audio_labels[0]));
+static unsigned char audio_profile_is_supported(const ROMRecord *record, unsigned char audio_profile) {
+    if (audio_profile == AUDIO_PROFILE_NONE) {
+        return 1;
+    }
+    if (audio_profile == AUDIO_PROFILE_SCC || audio_profile == AUDIO_PROFILE_SCC_PLUS) {
+        return record_supports_scc_audio(record);
+    }
+    if (audio_profile == AUDIO_PROFILE_DUAL_PSG) {
+        return record_supports_dual_psg(record);
+    }
+    return 0;
+}
+
+static unsigned char default_audio_profile(const ROMRecord *record) {
+    return record_supports_scc_audio(record) ? AUDIO_PROFILE_SCC : AUDIO_PROFILE_NONE;
+}
+
+static unsigned char sanitize_audio_profile(const ROMRecord *record, unsigned char audio_profile) {
+    if (audio_profile_is_supported(record, audio_profile)) {
+        return audio_profile;
+    }
+    return default_audio_profile(record);
+}
+
+static unsigned char next_audio_profile(const ROMRecord *record, unsigned char audio_profile, int dir) {
+    static const unsigned char audio_profiles[] = {
+        AUDIO_PROFILE_NONE,
+        AUDIO_PROFILE_SCC,
+        AUDIO_PROFILE_SCC_PLUS,
+        AUDIO_PROFILE_DUAL_PSG
+    };
+    const unsigned int audio_count = (unsigned int)(sizeof(audio_profiles) / sizeof(audio_profiles[0]));
+    int current = -1;
+
+    audio_profile = sanitize_audio_profile(record, audio_profile);
+
+    for (unsigned int i = 0; i < audio_count; i++) {
+        if (audio_profiles[i] == audio_profile) {
+            current = (int)i;
+            break;
+        }
+    }
+    if (current < 0) {
+        current = 0;
+    }
+
+    for (unsigned int step = 0; step < audio_count; step++) {
+        current += dir;
+        if (current < 0) {
+            current = (int)(audio_count - 1);
+        } else if ((unsigned int)current >= audio_count) {
+            current = 0;
+        }
+        if (audio_profile_is_supported(record, audio_profiles[current])) {
+            return audio_profiles[current];
+        }
+    }
+
+    return AUDIO_PROFILE_NONE;
+}
+
+static void build_audio_text(const ROMRecord *record, unsigned char audio_profile, char *out, size_t out_size) {
+    const char *audio_label = "None";
     if (!out || out_size == 0) {
         return;
     }
-    if (audio_index >= audio_count) {
-        audio_index = 0;
+    audio_profile = sanitize_audio_profile(record, audio_profile);
+    if (audio_profile == AUDIO_PROFILE_SCC) {
+        audio_label = "SCC";
+    } else if (audio_profile == AUDIO_PROFILE_SCC_PLUS) {
+        audio_label = "SCC+";
+    } else if (audio_profile == AUDIO_PROFILE_DUAL_PSG) {
+        audio_label = "Dual PSG";
     }
-    strncpy(out, audio_labels[audio_index], out_size - 1);
+    strncpy(out, audio_label, out_size - 1);
     out[out_size - 1] = '\0';
 }

@@ -37,6 +37,8 @@ NEXTOR_SUNRISE := ../nextor/kernel/Nextor-2.1.4.SunriseIDE.MasterOnly.ROM
 NEXTOR_SUNRISE_H := $(SRCDIR)/nextor_sunrise.h
 ESP8266P_ROM := ../../wifi/bios/ESP8266P.rom
 ESP8266P_ROM_H := $(SRCDIR)/esp8266p_rom.h
+FMPAC_BIOS := ../fmpac/FMPCCMFC.BIN
+FMPAC_BIOS_H := $(SRCDIR)/fmpac_bios.h
 
 # Helpers
 RM := rm -f
@@ -49,7 +51,7 @@ compile: $(BINDIR)/$(OUTFILE)
 
 package: $(DISDIR)/loadrom.exe
 
-$(BINDIR)/$(OUTFILE): $(BINDIR) $(SRCDIR)/$(SOURCES) $(PICOBIN_H) $(PICOBIN) $(NEXTOR_SUNRISE_H) $(NEXTOR_SUNRISE) $(ESP8266P_ROM_H) $(ESP8266P_ROM)
+$(BINDIR)/$(OUTFILE): $(BINDIR) $(SRCDIR)/$(SOURCES) $(PICOBIN_H) $(PICOBIN) $(NEXTOR_SUNRISE_H) $(NEXTOR_SUNRISE) $(ESP8266P_ROM_H) $(ESP8266P_ROM) $(FMPAC_BIOS_H) $(FMPAC_BIOS)
 	@echo "Compiling $@"
 	$(CC) $(CCFLAGS) -DAPP_VERSION=\"$(VERSION)\" $(SRCDIR)/$(SOURCES) -o $@
 
@@ -65,6 +67,10 @@ $(ESP8266P_ROM_H): $(ESP8266P_ROM)
 	@echo "Embedding ESP8266P WiFi ROM into header"
 	$(UTLDIR)/$(XXD) -i $< $@
 
+$(FMPAC_BIOS_H): $(FMPAC_BIOS)
+	@echo "Embedding FM-PAC BIOS ROM into header"
+	$(UTLDIR)/$(XXD) -i $< $@
+
 $(BINDIR):
 	@mkdir $@
 
@@ -77,5 +83,5 @@ $(DISDIR)/loadrom.exe: $(DISDIR) $(BINDIR)/$(OUTFILE)
 
 clean:
 	@echo "Cleaning ...."
-	$(RM) $(BINDIR)/*.exe $(BINDIR)/*.uf2 $(SRCDIR)/loadrom.h $(SRCDIR)/nextor_sunrise.h $(SRCDIR)/esp8266p_rom.h
+	$(RM) $(BINDIR)/*.exe $(BINDIR)/*.uf2 $(SRCDIR)/loadrom.h $(SRCDIR)/nextor_sunrise.h $(SRCDIR)/esp8266p_rom.h $(SRCDIR)/fmpac_bios.h
 	$(RM) $(DISDIR)/*

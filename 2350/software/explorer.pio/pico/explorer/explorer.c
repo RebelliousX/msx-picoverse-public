@@ -30,6 +30,7 @@
 #include "mapper_detect.h"
 #include "mp3.h"
 #include "emu2212.h"
+#include "emu2149.h"
 #include "msx_bus.pio.h"
 #include "pico/audio_i2s.h"
 #include "sunrise_ide.h"
@@ -129,8 +130,19 @@
 #define SOURCE_MODE_SD    0x02
 #define SOURCE_MODE_FILEHUNTER 0x03
 
-#define CTRL_AUDIO      (CTRL_BASE_ADDR + 9) // Control: audio selection (0=None, 1=SCC, 2=SCC+)
+#define CTRL_AUDIO      (CTRL_BASE_ADDR + 9) // Control: audio profile selection
 #define CTRL_WIFI_SUPPORT (CTRL_BASE_ADDR + 10) // Control: Sunrise WiFi support (0=No, 1=Yes)
+
+#define AUDIO_PROFILE_NONE       0u
+#define AUDIO_PROFILE_SCC        1u
+#define AUDIO_PROFILE_SCC_PLUS   2u
+#define AUDIO_PROFILE_DUAL_PSG 3u
+
+#define PSG_SAMPLE_RATE 44100
+#define PSG_CLOCK       1789773
+#define PSG_VOLUME_SHIFT 2
+#define PSG_PORT_REG    0x10u
+#define PSG_PORT_DATA   0x11u
 
 #define WIFI_MEM_F2_ADDR      0x7F05u
 #define WIFI_MEM_CMD_ADDR     0x7F06u
@@ -546,7 +558,7 @@ static volatile uint8_t mp3_pending_cmd = 0;
 static volatile uint8_t mp3_play_mode = MP3_PLAY_MODE_SINGLE;
 static uint16_t mp3_playing_filtered_index = 0xFFFF;
 static uint8_t mp3_now_playing_buf[MP3_NOW_PLAYING_SIZE];
-static volatile uint8_t ctrl_audio_selection = 0; // 0=None, 1=SCC, 2=SCC+
+static volatile uint8_t ctrl_audio_selection = AUDIO_PROFILE_NONE;
 static volatile uint8_t ctrl_wifi_support = 0; // 0=disabled, 1=enabled for Sunrise Nextor launches
 
 static uint8_t fh_page_index = 0;
@@ -591,6 +603,18 @@ static char fh_active_query[FH_QUERY_SIZE];
 static SCC scc_instance;
 static struct audio_buffer_pool *scc_audio_pool;
 
+static PSG psg_instance;
+static struct audio_buffer_pool *dual_psg_audio_pool;
+static bool dual_psg_ready = false;
+static bool dual_psg_audio_started = false;
+
+typedef enum {
+    AUDIO_MODE_NONE = 0,
+    AUDIO_MODE_SCC,
+    AUDIO_MODE_SCC_PLUS,
+    AUDIO_MODE_DUAL_PSG,
+} audio_mode_t;
+
 static const char *EXCLUDED_SD_FOLDERS[] = {
     "System Volume Information"
 };
@@ -606,6 +630,33 @@ static bool is_system_mapper(uint8_t mapper) {
            mapper == MAPPER_SUNRISE_MAPPER_USB ||
            mapper == MAPPER_SUNRISE_SD ||
            mapper == MAPPER_SUNRISE_MAPPER_SD;
+}
+
+static bool is_audio_system_mapper(uint8_t mapper) {
+    return mapper == 9u || is_system_mapper(mapper);
+}
+
+static bool mapper_supports_scc_audio(uint8_t mapper) {
+    return mapper == 3u || mapper == 14u;
+}
+
+static audio_mode_t resolve_audio_mode(uint8_t mapper, uint8_t requested_profile) {
+    if (is_audio_system_mapper(mapper)) {
+        return AUDIO_MODE_NONE;
+    }
+    if (mapper_supports_scc_audio(mapper)) {
+        if (requested_profile == AUDIO_PROFILE_SCC_PLUS) {
+            return AUDIO_MODE_SCC_PLUS;
+        }
+        if (requested_profile == AUDIO_PROFILE_SCC) {
+            return AUDIO_MODE_SCC;
+        }
+        return AUDIO_MODE_NONE;
+    }
+    if (requested_profile == AUDIO_PROFILE_DUAL_PSG) {
+        return AUDIO_MODE_DUAL_PSG;
+    }
+    return AUDIO_MODE_NONE;
 }
 
 static uint8_t mapper_code_from_record_byte(uint8_t mapper) {
@@ -2181,6 +2232,140 @@ static inline bool __not_in_flash_func(pio_try_get_io_read)(uint16_t *addr_out)
 
     *addr_out = (uint16_t)pio_sm_get(msx_io_bus.pio_read, msx_io_bus.sm_io_read);
     return true;
+}
+
+static inline int16_t __not_in_flash_func(clamp_i16)(int32_t sample)
+{
+    if (sample > 32767) return 32767;
+    if (sample < -32768) return -32768;
+    return (int16_t)sample;
+}
+
+static void __not_in_flash_func(dual_psg_init)(void)
+{
+    if (dual_psg_ready)
+        return;
+
+    memset(&psg_instance, 0, sizeof(psg_instance));
+    psg_instance.rate = PSG_SAMPLE_RATE;
+    PSG_setVolumeMode(&psg_instance, 2);
+    PSG_setClock(&psg_instance, PSG_CLOCK);
+    PSG_setQuality(&psg_instance, 1);
+    PSG_reset(&psg_instance);
+    msx_pio_io_bus_init();
+    dual_psg_ready = true;
+}
+
+static inline void __not_in_flash_func(dual_psg_service_io)(void)
+{
+    if (!dual_psg_ready)
+        return;
+
+    uint16_t io_addr;
+    uint8_t io_data;
+    while (pio_try_get_io_write(&io_addr, &io_data))
+    {
+        uint8_t port = io_addr & 0xFFu;
+        if (port == PSG_PORT_REG || port == PSG_PORT_DATA)
+            PSG_writeIO(&psg_instance, port, io_data);
+    }
+
+    while (pio_try_get_io_read(&io_addr))
+    {
+        pio_sm_put_blocking(msx_io_bus.pio_read, msx_io_bus.sm_io_read,
+                            pio_build_token(false, 0xFFu));
+    }
+}
+
+static inline int16_t __not_in_flash_func(dual_psg_calc_sample)(void)
+{
+    if (!dual_psg_ready)
+        return 0;
+
+    return clamp_i16((int32_t)PSG_calc(&psg_instance) << PSG_VOLUME_SHIFT);
+}
+
+static void __no_inline_not_in_flash_func(core1_dual_psg_audio)(void)
+{
+    while (true)
+    {
+        while (true)
+        {
+            dual_psg_service_io();
+            struct audio_buffer *buffer = take_audio_buffer(dual_psg_audio_pool, false);
+            if (buffer)
+            {
+                int16_t *samples = (int16_t *)buffer->buffer->bytes;
+                for (int i = 0; i < SCC_AUDIO_BUFFER_SAMPLES; i++)
+                {
+                    dual_psg_service_io();
+                    int16_t sample = dual_psg_calc_sample();
+                    samples[i * 2] = sample;
+                    samples[i * 2 + 1] = sample;
+                }
+                buffer->sample_count = SCC_AUDIO_BUFFER_SAMPLES;
+                give_audio_buffer(dual_psg_audio_pool, buffer);
+                break;
+            }
+            tight_loop_contents();
+        }
+    }
+}
+
+static void dual_psg_audio_init(void)
+{
+    if (dual_psg_audio_started)
+        return;
+
+    gpio_init(I2S_MUTE_PIN);
+    gpio_set_dir(I2S_MUTE_PIN, GPIO_OUT);
+    gpio_put(I2S_MUTE_PIN, 0);
+
+    static audio_format_t dual_psg_audio_format = {
+        .sample_freq = PSG_SAMPLE_RATE,
+        .format = AUDIO_BUFFER_FORMAT_PCM_S16,
+        .channel_count = 2,
+    };
+
+    static struct audio_buffer_format dual_psg_producer_format = {
+        .format = &dual_psg_audio_format,
+        .sample_stride = 4,
+    };
+
+    dual_psg_audio_pool = audio_new_producer_pool(&dual_psg_producer_format, 3, SCC_AUDIO_BUFFER_SAMPLES);
+
+    int dma_channel = -1;
+    for (int ch = 0; ch < NUM_DMA_CHANNELS; ch++) {
+        if (!dma_channel_is_claimed(ch)) {
+            dma_channel = ch;
+            break;
+        }
+    }
+    if (dma_channel < 0) {
+        dual_psg_audio_pool = NULL;
+        return;
+    }
+
+    static struct audio_i2s_config dual_psg_i2s_config = {
+        .data_pin = I2S_DATA_PIN,
+        .clock_pin_base = I2S_BCLK_PIN,
+        .dma_channel = 0,
+        .pio_sm = 2,
+    };
+    dual_psg_i2s_config.dma_channel = (uint)dma_channel;
+
+    audio_i2s_setup(&dual_psg_audio_format, &dual_psg_i2s_config);
+    audio_i2s_connect(dual_psg_audio_pool);
+    audio_i2s_set_enabled(true);
+    dual_psg_audio_started = true;
+}
+
+static void start_dual_psg_audio(void)
+{
+    dual_psg_init();
+    dual_psg_audio_init();
+    if (dual_psg_audio_pool)
+        multicore_launch_core1(core1_dual_psg_audio);
 }
 
 static inline uint8_t __not_in_flash_func(mapper_page_from_reg)(uint8_t reg)
@@ -6379,7 +6564,11 @@ int __no_inline_not_in_flash_func(main)()
     // flash path and keeps the mapper hot loop fast).
     bool cache_enable = true;
     uint8_t mapper = mapper_code_from_record_byte(selected->Mapper);
-    uint8_t audio_sel = ctrl_audio_selection;
+    audio_mode_t audio_mode = resolve_audio_mode(mapper, ctrl_audio_selection);
+    bool scc_audio = (audio_mode == AUDIO_MODE_SCC || audio_mode == AUDIO_MODE_SCC_PLUS);
+    if (audio_mode == AUDIO_MODE_DUAL_PSG) {
+        start_dual_psg_audio();
+    }
     bool wifi_support = (ctrl_wifi_support != 0u) && is_system_mapper(mapper);
 
     // Load the selected ROM into the MSX according to the mapper
@@ -6390,8 +6579,8 @@ int __no_inline_not_in_flash_func(main)()
             loadrom_plain32(rom_offset, cache_enable);
             break;
         case 3:
-            if (audio_sel == 1 || audio_sel == 2)
-                loadrom_konamiscc_scc(rom_offset, cache_enable, audio_sel == 2 ? SCC_ENHANCED : SCC_STANDARD);
+            if (scc_audio)
+                loadrom_konamiscc_scc(rom_offset, cache_enable, audio_mode == AUDIO_MODE_SCC_PLUS ? SCC_ENHANCED : SCC_STANDARD);
             else
                 loadrom_konamiscc(rom_offset, cache_enable);
             break;
@@ -6444,8 +6633,8 @@ int __no_inline_not_in_flash_func(main)()
             loadrom_planar64(rom_offset, cache_enable);
             break;
         case 14:
-            if (audio_sel == 1 || audio_sel == 2)
-                loadrom_manbow2_scc(rom_offset, cache_enable, audio_sel == 2 ? SCC_ENHANCED : SCC_STANDARD);
+            if (scc_audio)
+                loadrom_manbow2_scc(rom_offset, cache_enable, audio_mode == AUDIO_MODE_SCC_PLUS ? SCC_ENHANCED : SCC_STANDARD);
             else
                 loadrom_manbow2(rom_offset, cache_enable);
             break;

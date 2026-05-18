@@ -97,7 +97,7 @@ wait_sltsl:
 wait_iorq:
     wait 0 gpio 26           ; Wait for /IORQ=0 (I/O request)
     jmp pin wait_iorq         ; If /WR=1 (no write), re-check /IORQ
-    nop              [2]     ; Let address + data settle (3 cycles)
+    nop              [10]    ; Let I/O address + data settle inside /WR low
     mov isr, pins            ; Snapshot all GPIOs into ISR
     push block               ; Send (addr+data) to CPU via RX FIFO
     wait 1 gpio 25           ; Wait for /WR=1 (write cycle ends)

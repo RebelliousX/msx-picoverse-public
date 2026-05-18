@@ -52,6 +52,8 @@ add_executable(loadrom
     ${PICO_SDK_PATH}/lib/tinyusb/src/tusb.c
     loadrom.c 
     emu2212.c
+    emu2149.c
+    emu2413.c
     sunrise_ide.c
     sunrise_sd.c
     c2_emu.c

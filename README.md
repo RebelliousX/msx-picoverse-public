@@ -16,13 +16,13 @@ If you find any issues, have questions, or want to contribute, please open an is
 
 - Single-ROM LoadROM workflow for instant and easy booting of one title.
 - Multi-ROM loader with an on-screen menu and mapper auto-detection.
-- Explorer firmware (PicoVerse 2350) merges flash and microSD ROMs, labels the source (FL/SD), adds MP3 playback, supports on-device search, and includes an integrated File Hunter browser for downloading ROMs over ESP-01 WiFi.
+- Explorer firmware (PicoVerse 2350) merges flash and microSD ROMs, labels the source (FL/SD), adds MP3 playback, supports on-device search, includes ROM detail audio profiles with SCC/SCC+ and Dual PSG support, and includes an integrated File Hunter browser for downloading ROMs over ESP-01 WiFi.
 - Ready-made Nextor builds with USB pendrive (`-s2`/`-m2`) or microSD card (`-s1`/`-m1`) via Sunrise IDE emulation on PicoVerse 2350, and USB (`-s`/`-m`) on PicoVerse 2040.
 - Sunrise IDE + 192KB memory mapper on PicoVerse 2040 (`loadrom.exe -m`), or Sunrise IDE standalone (`loadrom.exe -s`).
 - Sunrise IDE + 1MB PSRAM memory mapper on PicoVerse 2350 (`loadrom.exe -m1` for microSD, `loadrom.exe -m2` for USB), or Sunrise IDE standalone (`loadrom.exe -s1` / `loadrom.exe -s2`).
 - Carnivore2-compatible RAM-mode loader on PicoVerse 2350 (`loadrom.exe -c1` / `loadrom.exe -c2`) for `SROM.COM /D15` uploads into the 1MB PSRAM mapper.
 - ESP-01 WiFi support for PicoVerse 2350 Sunrise IDE LoadROM/MultiROM builds (`loadrom.exe -s1 -w`, `-m1 -w`, `-s2 -w`, `-m2 -w`) and for the Explorer File Hunter browser. Compatible with both real MSX hardware and FPGA-based MSX cores.
-- SCC/SCC+ emulation on the PicoVerse 2350, with auto-detection and manual forcing options. 
+- SCC/SCC+, Dual PSG, and MSX-MUSIC/YM2413 emulation on the PicoVerse 2350, with per-ROM audio profile selection where supported.
 - PC-side tooling that generates UF2 images locally for quick drag-and-drop flashing.
 - USB keyboard support on PicoVerse 2040 — use a standard USB keyboard as the MSX keyboard via the cartridge slot.
 - MSX-MIDI support on PicoVerse 2040 — use a USB-MIDI cable as a standard MSX-MIDI interface via the cartridge slot. 
@@ -47,10 +47,12 @@ If you find any issues, have questions, or want to contribute, please open an is
 **Reference Material** 
 - [PicoVerse 2040 Features Overview](/docs/msx-picoverse-2040-features.md)
 - [PicoVerse 2350 Features Overview](/docs/msx-picoverse-2350-features.md)
+- [MSX PicoVerse 2350 Dual PSG Implementation](/docs/msx-picoverse-2350-dualpsg.md)
+- [MSX PicoVerse 2350 MSX-MUSIC/FM-PAC Implementation](/docs/msx-picoverse-2350-fmpac.md)
 - [MSX PicoVerse 2350 WiFi Support](/docs/msx-picoverse-2350-wifi.md)
 - [MSX PicoVerse 2040 PIO Strategy](/docs/msx-picoverse-2040-pio.md) 
 - [MSX PicoVerse 2350 PIO Strategy](/docs/msx-picoverse-2350-pio.md) 
-- [MSX PicoVerse 2350 SCC Emulation Guide](/docs/msx-picoverse-2350-scc.md)
+- [MSX PicoVerse 2350 SCC Emulation](/docs/msx-picoverse-2350-scc.md)
 - [MSX PicoVerse 2040 Sunrise IDE Emulation for Nextor](/docs/msx-picoverse-2040-sunrise-nextor.md) 
 - [MSX PicoVerse 2350 Sunrise IDE Emulation for Nextor](/docs/msx-picoverse-2350-sunrise-nextor.md) 
 - [MSX PicoVerse 2040 Mapper Implementation (Sunrise + Nextor)](/docs/msx-picoverse-2040-mapper.md) 
@@ -103,7 +105,7 @@ Interactive BOM available at [PicoVerse 2040 BOM](https://htmlpreview.github.io/
 - Targets RP2350 boards exposing all 48 GPIO pins (not compatible with standard Pico 2 boards).
 - Adds microSD storage, ESP8266 WiFi header, and I2S audio expansion alongside 16 MB flash space.
 - Extra RAM (PSRAM) now backs the 1MB mapper modes and the Carnivore2-compatible RAM loader, with room for additional advanced firmware features.
-- Explorer firmware can load ROMs from both flash and microSD, browse File Hunter over ESP-01 WiFi, save downloaded File Hunter ROMs to the microSD root, and search local title lists.
+- Explorer firmware can load ROMs from both flash and microSD, browse File Hunter over ESP-01 WiFi, save downloaded File Hunter ROMs to the microSD root, search local title lists, and select SCC/SCC+ or Dual PSG audio profiles per ROM where supported.
 - USB-C port doubles as a bridge for Nextor mass storage via Sunrise IDE emulation (`-s2`).
 - microSD card slot provides Nextor mass storage via Sunrise IDE emulation (`-s1`).
 - Sunrise IDE + 1MB PSRAM memory mapper mode provides both Nextor disk access and expanded RAM (`-m1` for microSD, `-m2` for USB).
@@ -158,7 +160,7 @@ Interactive BOM available at [PicoVerse 2350 BOM](https://htmlpreview.github.io/
 
 | PicoVerse 2040 MultiRom | PicoVerse 2350 MultiRom |
 |---------|---------|
-|![alt text](/images/multirom_2040_menu.png)|![alt text](/images/multirom_2350_menu.png)|
+|<img src="/images/2026-05-17_21-15.png" alt="PicoVerse 2040 MultiROM menu" width="420" height="315">|<img src="/images/2026-05-17_21-20.png" alt="PicoVerse 2350 MultiROM menu" width="420" height="315">|
 
 To use the MultiROM menu, insert the PicoVerse cartridge into your MSX and power it on. The system will boot directly into the MultiROM menu, which displays a list of all ROMs embedded in the cartridge. Each entry is named after the ROM filename (up to 50 characters), and longer names are shown using a scrolling effect.
 
@@ -184,7 +186,12 @@ The LoadROM tool targets situations where you want the PicoVerse to behave like 
       - USB joystick standalone mode: `loadrom.exe -j -o joystick.uf2`
       - SCC standard emulation (only PicoVerse 2350): `loadrom.exe -scc \\path\\to\\Game.ROM`
       - SCC+ enhanced emulation (only PicoVerse 2350): `loadrom.exe -sccplus \\path\\to\\Game.ROM`
+      - MSX-MUSIC/FM-PAC emulation with the bundled English FM-PAC BIOS (only PicoVerse 2350, non-SYSTEM ROMs): `loadrom.exe -f \\path\\to\\Game.ROM`, `loadrom.exe -fmpac \\path\\to\\Game.ROM`, or `loadrom.exe --fmpac -o mygame-fmpac.uf2 \\path\\to\\Game.ROM`
+      - Dual PSG emulation on secondary PSG ports `0x10`/`0x11` (only PicoVerse 2350, supported non-SYSTEM ROMs): `loadrom.exe -d \\path\\to\\Game.ROM` or `loadrom.exe --dual-psg -o mygame-dualpsg.uf2 \\path\\to\\Game.ROM`
       - `-scc` and `-sccplus` are mutually exclusive.
+      - `-scc`, `-sccplus`, `-f` / `-fmpac`, and `-d` / `--dual-psg` are cartridge audio modes; use only one of them per UF2.
+      - `-f` / `-fmpac` is not valid with Sunrise or Carnivore2 system modes (`-s1`, `-m1`, `-s2`, `-m2`, `-c1`, or `-c2`). Konami SCC and Manbow2 mapper ROMs can use `-f` / `-fmpac`, but that selects MSX-MUSIC/FM-PAC instead of SCC/SCC+ audio emulation.
+      - `-d` / `--dual-psg` is intended for software that writes to a second PSG. It is not available for Konami SCC or Manbow2 mapper ROMs, SCC/SCC+ audio builds, Sunrise/Nextor system modes, or Carnivore2 system modes.
       - Sunrise IDE standalone (PicoVerse 2040): `loadrom.exe -s`
       - Sunrise IDE + 192KB mapper (PicoVerse 2040): `loadrom.exe -m`
       - Sunrise IDE standalone (PicoVerse 2350): `loadrom.exe -s1` or `loadrom.exe -s2`
@@ -200,17 +207,18 @@ Consult the LoadROM manuals linked above for screenshots, troubleshooting, and i
 
 ## Explorer Firmware (RP2350)
 
-|Explorer Menu - 80 Columns|Explorer Search|
+|Explorer Flash Menu|Explorer MicroSD Menu|
 |---|---|
-|![](/images/WIN_20260207_19_59_37_Pro.jpg)|![](/images/WIN_20260207_20_00_51_Pro.jpg)|
-|<center>**MP3 Selection Screen**|<center>**MP3 Player Screen**|
-|![](/images/WIN_20260207_20_01_21_Pro.jpg)|![](/images/WIN_20260207_20_01_58_Pro.jpg)|
-|<center>**ROM Details Screen**||
-|![](/images/WIN_20260207_20_03_20_Pro.jpg)||
+|<img src="/images/2026-05-17_21-26.png" alt="Explorer flash menu" width="420" height="315">|<img src="/images/2026-05-17_21-28.png" alt="Explorer microSD menu" width="420" height="315">|
+|<center>**File Hunter Explorer Menu**|<center>**WiFi Configuration Screen**|
+|<img src="/images/2026-05-17_21-30.png" alt="File Hunter Explorer menu" width="420" height="315">|<img src="/images/2026-05-17_21-31.png" alt="WiFi configuration screen" width="420" height="315">|
 
-Explorer is a PicoVerse 2350-only firmware that merges ROMs stored in flash with additional ROMs and MP3 files on the microSD card. ROMs are labeled with source tags (FL/SD), MP3 entries open a player screen, the list supports paging, and you can search by name directly in the menu. With an ESP-01 / ESP8266 module installed and WiFi configured, pressing `F3` opens the integrated File Hunter browser. File Hunter results show the ROM name and size, can be searched from the MSX, and selected ROMs are downloaded through the Pico into PSRAM before being saved as `.ROM` files in the microSD root. microSD ROMs up to 2 MB are streamed into external PSRAM and executed directly from there. Use the Explorer tool to build the UF2 and copy extra ROMs and MP3 files to the microSD card. See the Explorer manual for limits (flash vs SD capacity, 2 MB SD ROM limit, File Hunter requirements, and supported formats).
+
+Explorer is a PicoVerse 2350-only firmware that merges ROMs stored in flash with additional ROMs and MP3 files on the microSD card. ROMs are labeled with source tags (FL/SD), MP3 entries open a player screen, the list supports paging, and you can search by name directly in the menu. With an ESP-01 / ESP8266 module installed and WiFi configured, pressing `F3` opens the integrated File Hunter browser. File Hunter results show the ROM name and size, can be searched from the MSX, and selected ROMs are downloaded through the Pico into PSRAM before being saved as `.ROM` files in the microSD root. microSD ROMs up to 2 MB can be executed directly from there. Use the Explorer tool to build the UF2 and copy extra ROMs and MP3 files to the microSD card. See the Explorer manual for limits (flash vs SD capacity, 2 MB SD ROM limit, File Hunter requirements, and supported formats).
 
 You can have up to 1024 entries per folder view (folders + ROMs + MP3s; the root view can also include flash entries). The menu auto-detects whether the MSX supports 80-column text mode and boots accordingly; you can also press `C` at any time to toggle between 40- and 80-column layouts.
+
+Explorer ROM entries open a detail screen where you can inspect mapper detection and choose a cartridge audio profile. For supported non-SYSTEM ROMs, select **Dual PSG** and run the ROM to enable the second cartridge-side PSG on ports `0x10` and `0x11`. Explorer hides or rejects Dual PSG where the second cartridge audio slot is reserved, including Konami SCC, Manbow2, SYSTEM entries, folders, and File Hunter folder records. 
 
 A search function is available by pressing `/` in the menu. Type part of a ROM name and press Enter to jump to the first matching entry. Press `H` to view the help screen.
 
@@ -236,7 +244,11 @@ All hardware and firmware binaries in this repository are released under the Cre
 
 **emu2212.c** and **emu2212.h** used to implement SCC and SCC+ emulation are copyright by Mitsutaka Okazaki 2014 and licensed under the MIT License, allowing for free use, modification, and distribution with proper attribution. [emu2212 @ Digital Sound Antiques](https://github.com/digital-sound-antiques/emu2212)
 
-**emu2149.c** and **emu2149.h** used to implement AY-3-8910 emulation are copyright by Mitsutaka Okazaki 2014 and licensed under the MIT License, allowing for free use, modification, and distribution with proper attribution. [emu2149 @ Digital Sound Antiques](https://github.com/digital-sound-antiques/emu2149)
+**emu2149.c** and **emu2149.h** used to implement AY-3-8910 emulation/dual PSG feature are copyright by Mitsutaka Okazaki 2014 and licensed under the MIT License, allowing for free use, modification, and distribution with proper attribution. [emu2149 @ Digital Sound Antiques](https://github.com/digital-sound-antiques/emu2149)
+
+**emu2413.c** and **emu2413.h** used to implement YM2413 / MSX-MUSIC emulation are copyright by Mitsutaka Okazaki 2020 and licensed under the MIT License, allowing for free use, modification, and distribution with proper attribution. [emu2413 @ Digital Sound Antiques](https://github.com/digital-sound-antiques/emu2413)
+
+**FMPCCMFC.BIN** is the English FM-PAC BIOS used by PicoVerse 2350 LoadROM when `-f` / `-fmpac` is selected. The FM-PAC BIOS ROM is copyrighted by Matsushita Corp.; the English translation is credited to 232, Max Iwamoto, and GDX.
 
 **MIDI-PAC PSG-to-MIDI Conversion:**  
 The MIDI-PAC firmware and its quality improvements were developed against public technical references and behavior studies. The PSG-to-MIDI mapping combines hardware-correct AY-3-8910 / YM2149 interpretation with pragmatic General MIDI reinterpretation for musical output on modules like the Roland SC-55. Key references used include:  
@@ -274,4 +286,4 @@ Those projects remain copyright by Oduvaldo Pavan Junior and their respective co
 Questions, test reports, and build photos are welcome. Open an issue on the public repository or reach out through the MSX retro hardware forums where PicoVerse updates are posted.
 
 Author: Cristiano Goncalves
-Last updated: 05/04/2026
+Last updated: 05/17/2026

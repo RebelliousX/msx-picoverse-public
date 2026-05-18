@@ -7,7 +7,7 @@ The Explorer tool creates a UF2 image that flashes the PicoVerse 2350 cartridge 
 - The ROM payloads that will live in Pico flash.
 - The integrated File Hunter browser and WiFi configuration support used by the Explorer menu.
 
-Use the Explorer tool when you want a menu that loads ROMs from flash, microSD, and the online File Hunter catalog on the PicoVerse 2350, or if you want to explore advanced features like MP3 playback and SCC/SCC+ audio on your MSX computer.
+Use the Explorer tool when you want a menu that loads ROMs from flash, microSD, and the online File Hunter catalog on the PicoVerse 2350, or if you want to explore advanced features like MP3 playback, SCC/SCC+ audio, and Dual PSG audio on your MSX computer.
 
 ## Requirements
 
@@ -44,7 +44,7 @@ Use the Explorer tool when you want a menu that loads ROMs from flash, microSD, 
 - **WiFi configuration**: Press `F4` to enter the WiFi setup flow used by the ESP8266P-compatible WiFi firmware.
 - **Automatic detection** of MSX models that support 80-column text mode. Compatible machines boot the menu in 80 columns; others fall back to 40 columns, and you can press `C` at any time to toggle between layouts.
 - MP3 entries are listed in the menu with a "MP3" type label and open an **MP3 player** screen when selected.
-- ROM entries open a ROM screen that lets you inspect mapper detection, choose **audio profiles**, and enable optional WiFi support for Sunrise Nextor entries before running.
+- ROM entries open a ROM screen that lets you inspect mapper detection, choose **audio profiles** including SCC/SCC+ or Dual PSG where supported, and enable optional WiFi support for Sunrise Nextor entries before running.
 
 ## Command-line usage
 
@@ -262,7 +262,7 @@ Status details are shown at the bottom of the screen, including:
 Selecting a ROM entry opens a ROM details screen before running:
 
 - **Mapper**: Shows the detected mapper (for SD ROMs) and allows manual override using Left/Right.
-- **Audio**: Choose an audio profile with Left/Right (None, SCC, SCC+).
+- **Audio**: Choose an audio profile with Left/Right (None, SCC, SCC+, Dual PSG). The menu only cycles through profiles supported by the selected ROM mapper.
 - **Wifi**: For Sunrise Nextor entries only, choose whether to expose the ESP8266P WiFi BIOS before running. The default is No.
 - **Action: Run**: Press Enter to launch the ROM.
 - **Esc**: Return to the menu without running.
@@ -274,12 +274,25 @@ If a ROM mapper is unknown, the screen will briefly show "Detecting..." while th
 - **None**: No sound emulation. The ROM runs with its original audio through the MSX's built-in PSG (if the game uses PSG sound).
 - **SCC**: Enables Konami SCC (standard) sound emulation. Use this for games that use the standard SCC chip with shared channel 4/5 waveforms (e.g., *Space Manbow*, *Salamander*, *Nemesis 2*, *Gradius 2*).
 - **SCC+**: Enables Konami SCC+ (enhanced/SCC-I) sound emulation. Use this for games or homebrew that require SCC+ features with independent channel 4/5 waveforms.
+- **Dual PSG**: Enables a secondary AY-3-8910 compatible PSG on I/O ports `0x10` (register select) and `0x11` (data write), matching the common Carnivore2 / MegaFlashROM / FlashJacks style second-PSG convention. Use this for ROMs or patches that explicitly support dual PSG music.
 
-The SCC and SCC+ audio profiles work with ROMs using the Konami SCC mapper (`KonSCC`) or the Manbow2 mapper (`MANBW2`). When a ROM is detected as `KonSCC` or `MANBW2`, the ROM screen pre-selects **SCC** in the Audio field; you can change it to None or SCC+ before pressing Run. For non-SCC / non-Manbow2 mappers the audio selection has no effect.
+Explorer treats audio profiles as mutually exclusive: a ROM can run with no extra audio, SCC, SCC+, or Dual PSG, but not multiple cartridge audio engines at the same time.
+
+The SCC and SCC+ audio profiles work with ROMs using the Konami SCC mapper (`KonSCC`) or the Manbow2 mapper (`MANBW2`). When a ROM is detected as `KonSCC` or `MANBW2`, the ROM screen pre-selects **SCC** in the Audio field; you can change it to None or SCC+ before pressing Run. Dual PSG is not offered for these mappers because the cartridge audio slot is reserved for SCC/SCC+.
+
+The Dual PSG profile is available for regular non-SYSTEM ROMs that are not Konami SCC or Manbow2. It is not offered for Sunrise/Nextor SYSTEM entries, NEO system entries, folders, or SCC-capable ROMs.
 
 ## SCC/SCC+ sound emulation
 
 The PicoVerse 2350 Explorer firmware can emulate the Konami SCC and SCC+ (SCC-I) sound chips in hardware, generating audio through an I2S DAC connected to the RP2350. This gives MSX games that use SCC or SCC+ sound their full soundtrack without requiring an original SCC cartridge.
+
+## Dual PSG sound emulation
+
+The PicoVerse 2350 Explorer firmware can also emulate a second AY-3-8910 compatible PSG for ROMs that write to the standard secondary PSG ports. The Pico captures writes to `0x10` and `0x11`, feeds them to the emulated PSG, and streams the generated audio through the same I2S DAC path used by the other cartridge audio engines.
+
+The MSX's internal PSG remains active as usual. The Dual PSG profile adds the external/secondary PSG only; software must be written or patched to use ports `0x10` and `0x11` for the extra three channels.
+
+For firmware architecture, port handling, audio routing, and LoadROM/Explorer differences, see the [PicoVerse 2350 Dual PSG implementation guide](./msx-picoverse-2350-dualpsg.md).
 
 ## External references
 
@@ -287,4 +300,4 @@ The PicoVerse 2350 Explorer firmware can emulate the Konami SCC and SCC+ (SCC-I)
 - File Hunter service: http://file-hunter.com/
 
 Author: Cristiano Goncalves
-Last updated: 05/04/2026
+Last updated: 05/16/2026

@@ -27,6 +27,7 @@
 #include "loadrom.h"
 #include "nextor_sunrise.h"
 #include "esp8266p_rom.h"
+#include "fmpac_bios.h"
 #include "sha1.h"
 #include "romdb.h"
 
@@ -91,6 +92,8 @@ static const char *rom_types[] = {
 #define ROM_TYPE_C2_SD 17
 #define ROM_TYPE_C2_USB 18
 
+#define ROM_TYPE_DUAL_PSG_FLAG 0x10
+#define ROM_TYPE_MSX_MUSIC_FLAG 0x20
 #define ROM_TYPE_WIFI_FLAG 0x20
 
 #define MAPPER_DESCRIPTION_COUNT (sizeof(MAPPER_DESCRIPTIONS) / sizeof(MAPPER_DESCRIPTIONS[0]))
@@ -396,7 +399,7 @@ static void print_usage(const char *prog_name) {
     size_t i;
     bool first = true;
 
-    printf("Usage: %s [-h] [-s1] [-m1] [-s2] [-m2] [-c1] [-c2] [-w] [-scc] [-sccplus] [-o <filename>] [romfile]\n", prog_name);
+    printf("Usage: %s [-h] [-s1] [-m1] [-s2] [-m2] [-c1] [-c2] [-w] [-d] [-f] [-scc] [-sccplus] [-o <filename>] [romfile]\n", prog_name);
     printf("\n");
     printf("Options:\n");
     printf("  -h, --help         Show this help message\n");
@@ -407,6 +410,8 @@ static void print_usage(const char *prog_name) {
     printf("  -c1, --carnivore2-sd  Build UF2 with Sunrise IDE Nextor ROM + 1MB PSRAM mapper + Carnivore2 RAM emulation (microSD card)\n");
     printf("  -c2, --carnivore2-usb Build UF2 with Sunrise IDE Nextor ROM + 1MB PSRAM mapper + Carnivore2 RAM emulation (USB pendrive)\n");
     printf("  -w, --wifi         Enable ESP-01 WiFi support for Sunrise IDE Nextor modes (-s1/-m1/-s2/-m2 only)\n");
+    printf("  -d, --dual-psg     Enable secondary PSG emulation on I/O ports 0x10/0x11\n");
+    printf("  -f, -fmpac         Enable MSX-MUSIC/YM2413 emulation on I/O ports 0x7C/0x7D\n");
     printf("  -scc, --scc        Enable SCC sound emulation (Konami SCC mapper only)\n");
     printf("  -sccplus, --sccplus  Enable SCC+ (enhanced) sound emulation (Konami SCC mapper only)\n");
     printf("  -o <filename>, --output <filename>  Set UF2 output filename (default %s)\n", UF2FILENAME);
@@ -584,6 +589,8 @@ int main(int argc, char *argv[])
     bool use_c2_sd = false;
     bool use_c2_usb = false;
     bool use_wifi = false;
+    bool dual_psg = false;
+    bool msx_music = false;
     bool scc_emulation = false;
     bool scc_plus = false;
 
@@ -605,6 +612,10 @@ int main(int argc, char *argv[])
             use_c2_usb = true;
         } else if ((strcmp(argv[i], "-w") == 0) || (strcmp(argv[i], "--wifi") == 0)) {
             use_wifi = true;
+        } else if ((strcmp(argv[i], "-d") == 0) || (strcmp(argv[i], "--dual-psg") == 0)) {
+            dual_psg = true;
+        } else if ((strcmp(argv[i], "-f") == 0) || (strcmp(argv[i], "-fmpac") == 0) || (strcmp(argv[i], "--fmpac") == 0)) {
+            msx_music = true;
         } else if ((strcmp(argv[i], "-scc") == 0) || (strcmp(argv[i], "--scc") == 0)) {
             scc_emulation = true;
         } else if ((strcmp(argv[i], "-sccplus") == 0) || (strcmp(argv[i], "--sccplus") == 0)) {
@@ -646,6 +657,21 @@ int main(int argc, char *argv[])
 
     if (scc_emulation && scc_plus) {
         printf("Error: -scc and -sccplus are mutually exclusive. Use only one.\n");
+        return 1;
+    }
+
+    if ((dual_psg && msx_music) || (dual_psg && (scc_emulation || scc_plus)) || (msx_music && (scc_emulation || scc_plus))) {
+        printf("Error: -scc, -sccplus, -d/--dual-psg and -f/-fmpac are mutually exclusive; only one audio emulation can be active.\n");
+        return 1;
+    }
+
+    if (dual_psg && use_nextor) {
+        printf("Error: -d/--dual-psg is supported only when loading an external ROM file.\n");
+        return 1;
+    }
+
+    if (msx_music && use_nextor) {
+        printf("Error: -f/-fmpac is supported only when loading a non-SYSTEM external ROM file.\n");
         return 1;
     }
 
@@ -707,7 +733,7 @@ int main(int argc, char *argv[])
             return 1;
         }
 
-        uint8_t base_rom_type = (uint8_t)(rom_type & ~(0x80u | 0x40u | ROM_TYPE_WIFI_FLAG));
+        uint8_t base_rom_type = (uint8_t)(rom_type & ~(0x80u | 0x40u | ROM_TYPE_WIFI_FLAG | ROM_TYPE_DUAL_PSG_FLAG | ROM_TYPE_MSX_MUSIC_FLAG));
         printf("ROM Type: %s [Embedded]\n", rom_types[base_rom_type]);
         printf("ROM Name: %s\n", sunrise_name);
         printf("ROM Size: %u bytes\n", sunrise_rom_size);
@@ -816,6 +842,25 @@ int main(int argc, char *argv[])
         printf("SCC Emulation: Disabled (use -scc or -sccplus to enable)\n");
     }
 
+    if (dual_psg && (rom_type == 3 || rom_type == ROM_TYPE_MANBOW2)) {
+        printf("Error: Second PSG is not supported with Konami SCC ROMs.\n");
+        return 1;
+    }
+
+    if (dual_psg) {
+        rom_type |= ROM_TYPE_DUAL_PSG_FLAG;
+        printf("Dual PSG Emulation: Enabled on I/O ports 0x10/0x11\n");
+    }
+
+    const uint8_t *fmpac_bios_rom = NULL;
+    uint32_t fmpac_bios_size = 0u;
+    if (msx_music) {
+        rom_type |= ROM_TYPE_MSX_MUSIC_FLAG;
+        fmpac_bios_rom = ___fmpac_FMPCCMFC_BIN;
+        fmpac_bios_size = (uint32_t)___fmpac_FMPCCMFC_BIN_len;
+        printf("MSX-MUSIC/FM-PAC Emulation: Enabled with BIOS and YM2413 ports 0x7C/0x7D\n");
+    }
+
     char rom_name[MAX_FILE_NAME_LENGTH] = {0};
     size_t raw_length = (size_t)(name_end - base_name);
     if (raw_length >= MAX_FILE_NAME_LENGTH) {
@@ -831,6 +876,6 @@ int main(int argc, char *argv[])
     printf("Pico Offset: 0x%08X\n", base_offset);
     printf("UF2 Output: %s\n", output_filename);
 
-    create_uf2_file(rom_filename, NULL, rom_size, NULL, 0u, rom_type, rom_name, base_offset, output_filename);
+    create_uf2_file(rom_filename, NULL, rom_size, fmpac_bios_rom, fmpac_bios_size, rom_type, rom_name, base_offset, output_filename);
     return 0;
 }

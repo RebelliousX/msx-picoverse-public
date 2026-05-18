@@ -28,6 +28,8 @@
 #include "hardware/structs/xip_ctrl.h"
 #include "loadrom.h"
 #include "emu2212.h"
+#include "emu2149.h"
+#include "emu2413.h"
 #include "msx_bus.pio.h"
 #include "hardware/uart.h"
 #include "hardware/gpio.h"
@@ -81,6 +83,60 @@ static SCC scc_instance;
 static struct audio_buffer_pool *audio_pool;
 static bool scc_audio_ready = false;
 static int scc_dma_channel = -1;
+
+// -----------------------------------------------------------------------
+// Dual PSG emulation state
+// -----------------------------------------------------------------------
+static PSG psg_instance;
+static bool dual_psg_enabled = false;
+static bool dual_psg_ready = false;
+static bool dual_psg_audio_started = false;
+static volatile bool dual_psg_io_core1 = false;
+
+// -----------------------------------------------------------------------
+// MSX-MUSIC / YM2413 emulation state
+// -----------------------------------------------------------------------
+static OPLL *msx_music_instance = NULL;
+static spin_lock_t *msx_music_lock = NULL;
+static bool msx_music_enabled = false;
+static bool msx_music_ready = false;
+static bool msx_music_audio_started = false;
+static volatile bool msx_music_io_core1 = false;
+
+// -----------------------------------------------------------------------
+// Cartridge audio mode
+// -----------------------------------------------------------------------
+// Exactly ONE audio option is active per ROM. Future sound chips (OPLL,
+// MSX-AUDIO, etc.) plug in by adding a new enumerator and a case in the
+// audio init switch in main(); they MUST remain mutually exclusive.
+typedef enum {
+    AUDIO_MODE_NONE = 0,    // No on-cartridge audio emulation
+    AUDIO_MODE_SCC,         // Konami SCC (standard) via I2S
+    AUDIO_MODE_SCC_PLUS,    // Konami SCC+ (enhanced) via I2S
+    AUDIO_MODE_DUAL_PSG,    // Secondary AY-3-8910 on I/O 0x10/0x11 via I2S
+    AUDIO_MODE_MSX_MUSIC,    // MSX-MUSIC YM2413 on I/O 0x7C/0x7D via I2S
+} audio_mode_t;
+
+// Resolve which audio engine to activate for this cartridge. SCC/SCC+ and
+// MSX-MUSIC are mutually exclusive tool choices, but MSX-MUSIC is valid
+// for SCC-capable mappers when the SCC chip is not enabled.
+static inline audio_mode_t resolve_audio_mode(uint8_t rom_type, uint8_t base_rom_type, bool system_mode)
+{
+    if (system_mode)
+        return AUDIO_MODE_NONE;
+
+    bool scc_capable    = (base_rom_type == 3u || base_rom_type == 14u);
+    bool scc_flag       = (rom_type & SCC_FLAG)      != 0;
+    bool scc_plus_flag  = (rom_type & SCC_PLUS_FLAG) != 0;
+    bool dual_psg_flag  = (rom_type & DUAL_PSG_FLAG) != 0;
+    bool msx_music_flag = (rom_type & MSX_MUSIC_FLAG) != 0;
+
+    if (scc_capable && scc_plus_flag) return AUDIO_MODE_SCC_PLUS;
+    if (scc_capable && scc_flag)      return AUDIO_MODE_SCC;
+    if (dual_psg_flag)                return AUDIO_MODE_DUAL_PSG;
+    if (msx_music_flag)               return AUDIO_MODE_MSX_MUSIC;
+    return AUDIO_MODE_NONE;
+}
 
 // -----------------------------------------------------------------------
 // Sunrise WiFi memio backend
@@ -871,6 +927,170 @@ static inline bool __not_in_flash_func(pio_try_get_io_read)(uint16_t *addr_out)
     return true;
 }
 
+static inline int16_t __not_in_flash_func(clamp_i16)(int32_t sample)
+{
+    if (sample > 32767) return 32767;
+    if (sample < -32768) return -32768;
+    return (int16_t)sample;
+}
+
+static void __not_in_flash_func(dual_psg_init)(void)
+{
+    if (!dual_psg_enabled || dual_psg_ready)
+        return;
+
+    memset(&psg_instance, 0, sizeof(psg_instance));
+    psg_instance.rate = PSG_SAMPLE_RATE;
+    PSG_setVolumeMode(&psg_instance, 2);
+    PSG_setClock(&psg_instance, PSG_CLOCK);
+    PSG_setQuality(&psg_instance, 1);
+    PSG_reset(&psg_instance);
+    msx_pio_io_bus_init();
+    dual_psg_ready = true;
+}
+
+static inline int16_t __not_in_flash_func(dual_psg_calc_sample)(void)
+{
+    if (!dual_psg_ready)
+        return 0;
+
+    return clamp_i16((int32_t)PSG_calc(&psg_instance) << PSG_VOLUME_SHIFT);
+}
+
+static void __no_inline_not_in_flash_func(core1_dual_psg_audio)(void);
+static void __no_inline_not_in_flash_func(core1_msx_music_audio)(void);
+static void i2s_audio_init(void);
+static void __not_in_flash_func(dual_psg_start_audio)(void);
+static void __not_in_flash_func(msx_music_start_audio)(void);
+static void __not_in_flash_func(sunrise_wait_for_expanded_bootstrap)(void);
+
+static inline void __not_in_flash_func(dual_psg_service_io)(void)
+{
+    if (!dual_psg_ready)
+        return;
+    if (dual_psg_io_core1 && get_core_num() == 0)
+        return;
+
+    uint16_t io_addr;
+    uint8_t io_data;
+    while (pio_try_get_io_write(&io_addr, &io_data))
+    {
+        uint8_t port = io_addr & 0xFFu;
+        if (port == PSG_PORT_REG || port == PSG_PORT_DATA)
+            PSG_writeIO(&psg_instance, port, io_data);
+    }
+
+    while (pio_try_get_io_read(&io_addr))
+    {
+        pio_sm_put_blocking(msx_io_bus.pio_read, msx_io_bus.sm_io_read,
+                            pio_build_token(false, 0xFFu));
+    }
+}
+
+static inline struct audio_buffer *__not_in_flash_func(take_audio_buffer_with_dual_psg_io)(void)
+{
+    if (!dual_psg_ready)
+        return take_audio_buffer(audio_pool, true);
+
+    while (true)
+    {
+        dual_psg_service_io();
+        struct audio_buffer *buffer = take_audio_buffer(audio_pool, false);
+        if (buffer)
+            return buffer;
+        tight_loop_contents();
+    }
+}
+
+static inline uint16_t __not_in_flash_func(pio_get_read_servicing_dual_psg)(void)
+{
+    dual_psg_service_io();
+    while (pio_sm_is_rx_fifo_empty(msx_bus.pio, msx_bus.sm_read))
+    {
+        dual_psg_service_io();
+        tight_loop_contents();
+    }
+    return (uint16_t)pio_sm_get(msx_bus.pio, msx_bus.sm_read);
+}
+
+static void __not_in_flash_func(msx_music_init)(void)
+{
+    if (!msx_music_enabled || msx_music_ready)
+        return;
+
+    msx_music_instance = OPLL_new(MSX_MUSIC_CLOCK, MSX_MUSIC_SAMPLE_RATE);
+    if (!msx_music_instance)
+        return;
+
+    if (!msx_music_lock)
+        msx_music_lock = spin_lock_instance(spin_lock_claim_unused(true));
+
+    OPLL_reset(msx_music_instance);
+    OPLL_setChipType(msx_music_instance, OPLL_2413_TONE);
+    OPLL_resetPatch(msx_music_instance, OPLL_2413_TONE);
+    msx_pio_io_bus_init();
+    msx_music_ready = true;
+}
+
+static inline int16_t __not_in_flash_func(msx_music_calc_sample)(void)
+{
+    if (!msx_music_ready)
+        return 0;
+
+    uint32_t save = spin_lock_blocking(msx_music_lock);
+    int16_t sample = OPLL_calc(msx_music_instance);
+    spin_unlock(msx_music_lock, save);
+    return sample;
+}
+
+static inline void __not_in_flash_func(msx_music_write_io)(uint8_t port, uint8_t data)
+{
+    if (!msx_music_ready)
+        return;
+
+    uint32_t save = spin_lock_blocking(msx_music_lock);
+    OPLL_writeIO(msx_music_instance, port, data);
+    spin_unlock(msx_music_lock, save);
+}
+
+static inline void __not_in_flash_func(msx_music_service_io)(void)
+{
+    if (!msx_music_ready)
+        return;
+    if (msx_music_io_core1 && get_core_num() == 0)
+        return;
+
+    uint16_t io_addr;
+    uint8_t io_data;
+    while (pio_try_get_io_write(&io_addr, &io_data))
+    {
+        uint8_t port = io_addr & 0xFFu;
+        if (port == MSX_MUSIC_PORT_REG || port == MSX_MUSIC_PORT_DATA)
+            msx_music_write_io(port, io_data);
+    }
+
+    while (pio_try_get_io_read(&io_addr))
+    {
+        pio_sm_put_blocking(msx_io_bus.pio_read, msx_io_bus.sm_io_read,
+                            pio_build_token(false, 0xFFu));
+    }
+}
+
+static inline struct audio_buffer *__not_in_flash_func(take_audio_buffer_with_msx_music_io)(void)
+{
+    if (!msx_music_ready)
+        return take_audio_buffer(audio_pool, true);
+
+    while (true)
+    {
+        msx_music_service_io();
+        struct audio_buffer *buffer = take_audio_buffer(audio_pool, false);
+        if (buffer)
+            return buffer;
+        tight_loop_contents();
+    }
+}
+
 // -----------------------------------------------------------------------
 // Bank switching write handlers (used by mapper ROM types)
 // -----------------------------------------------------------------------
@@ -882,6 +1102,69 @@ typedef struct {
 typedef struct {
     uint16_t *bank_regs;
 } bank16_ctx_t;
+
+typedef struct {
+    uint8_t page;
+    uint8_t control;
+    uint8_t sram_key_5ffe;
+    uint8_t sram_key_5fff;
+    uint8_t sram[8192];
+} fmpac_state_t;
+
+static inline bool __not_in_flash_func(fmpac_sram_enabled)(const fmpac_state_t *fmpac)
+{
+    return fmpac->sram_key_5ffe == 0x4Du && fmpac->sram_key_5fff == 0x69u;
+}
+
+static inline void __not_in_flash_func(fmpac_handle_write)(fmpac_state_t *fmpac, uint16_t addr, uint8_t data)
+{
+    if (addr == 0x7FF4u)
+    {
+        msx_music_write_io(MSX_MUSIC_PORT_REG, data);
+    }
+    else if (addr == 0x7FF5u)
+    {
+        msx_music_write_io(MSX_MUSIC_PORT_DATA, data);
+    }
+    else if (addr == 0x7FF6u)
+    {
+        fmpac->control = data;
+    }
+    else if (addr == 0x7FF7u)
+    {
+        fmpac->page = data & 0x03u;
+    }
+    else if (addr == 0x5FFEu)
+    {
+        fmpac->sram_key_5ffe = data;
+    }
+    else if (addr == 0x5FFFu)
+    {
+        fmpac->sram_key_5fff = data;
+    }
+    else if (fmpac_sram_enabled(fmpac) && addr >= 0x4000u && addr <= 0x5FFFu)
+    {
+        fmpac->sram[addr - 0x4000u] = data;
+    }
+}
+
+static inline uint8_t __not_in_flash_func(fmpac_handle_read)(const fmpac_state_t *fmpac, const uint8_t *bios_base, uint16_t addr)
+{
+    if (addr == 0x7FF6u)
+        return fmpac->control;
+    if (addr == 0x7FF7u)
+        return fmpac->page;
+    if (fmpac_sram_enabled(fmpac) && addr >= 0x4000u && addr <= 0x5FFFu)
+        return fmpac->sram[addr - 0x4000u];
+
+    if (addr >= 0x4000u && addr <= 0x7FFFu)
+    {
+        uint32_t rel = ((uint32_t)(fmpac->page & 0x03u) << 14) | (addr & 0x3FFFu);
+        if (rel < FMPAC_BIOS_SIZE)
+            return bios_base[rel];
+    }
+    return 0xFFu;
+}
 
 static inline void __not_in_flash_func(handle_konamiscc_write)(uint16_t addr, uint8_t data, void *ctx)
 {
@@ -980,7 +1263,18 @@ static void __no_inline_not_in_flash_func(banked8_loop)(
     {
         pio_drain_writes(write_handler, &ctx);
 
-        uint16_t addr = (uint16_t)pio_sm_get_blocking(msx_bus.pio, msx_bus.sm_read);
+        uint16_t addr;
+        while (true)
+        {
+            dual_psg_service_io();
+            pio_drain_writes(write_handler, &ctx);
+            if (!pio_sm_is_rx_fifo_empty(msx_bus.pio, msx_bus.sm_read))
+            {
+                addr = (uint16_t)pio_sm_get(msx_bus.pio, msx_bus.sm_read);
+                break;
+            }
+            tight_loop_contents();
+        }
 
         pio_drain_writes(write_handler, &ctx);
 
@@ -1011,7 +1305,7 @@ void __no_inline_not_in_flash_func(loadrom_plain32)(uint32_t offset, bool cache_
 
     while (true)
     {
-        uint16_t addr = (uint16_t)pio_sm_get_blocking(msx_bus.pio, msx_bus.sm_read);
+        uint16_t addr = pio_get_read_servicing_dual_psg();
 
         bool in_window = (addr >= 0x4000u) && (addr <= 0xBFFFu);
         uint8_t data = in_window ? rom_base[addr - 0x4000u] : 0xFFu;
@@ -1030,7 +1324,7 @@ void __no_inline_not_in_flash_func(loadrom_linear48)(uint32_t offset, bool cache
 
     while (true)
     {
-        uint16_t addr = (uint16_t)pio_sm_get_blocking(msx_bus.pio, msx_bus.sm_read);
+        uint16_t addr = pio_get_read_servicing_dual_psg();
 
         bool in_window = (addr <= 0xBFFFu);
         uint8_t data = in_window ? rom_base[addr] : 0xFFu;
@@ -1063,9 +1357,7 @@ static void __no_inline_not_in_flash_func(core1_scc_audio)(void)
         {
             int16_t raw = SCC_calc(&scc_instance);
             int32_t boosted = (int32_t)raw << SCC_VOLUME_SHIFT;
-            if (boosted > 32767) boosted = 32767;
-            else if (boosted < -32768) boosted = -32768;
-            int16_t s = (int16_t)boosted;
+            int16_t s = clamp_i16(boosted);
             samples[i * 2]     = s;  // left
             samples[i * 2 + 1] = s;  // right
         }
@@ -1088,14 +1380,48 @@ void __not_in_flash_func(service_scc_audio)(void)
     {
         int16_t raw = SCC_calc(&scc_instance);
         int32_t boosted = (int32_t)raw << SCC_VOLUME_SHIFT;
-        if (boosted > 32767) boosted = 32767;
-        else if (boosted < -32768) boosted = -32768;
-        int16_t s = (int16_t)boosted;
+        int16_t s = clamp_i16(boosted);
         samples[i * 2]     = s;
         samples[i * 2 + 1] = s;
     }
     buffer->sample_count = SCC_AUDIO_BUFFER_SAMPLES;
     give_audio_buffer(audio_pool, buffer);
+}
+
+static void __no_inline_not_in_flash_func(core1_dual_psg_audio)(void)
+{
+    while (true)
+    {
+        struct audio_buffer *buffer = take_audio_buffer_with_dual_psg_io();
+        int16_t *samples = (int16_t *)buffer->buffer->bytes;
+        for (int i = 0; i < SCC_AUDIO_BUFFER_SAMPLES; i++)
+        {
+            dual_psg_service_io();
+            int16_t s = dual_psg_calc_sample();
+            samples[i * 2]     = s;
+            samples[i * 2 + 1] = s;
+        }
+        buffer->sample_count = SCC_AUDIO_BUFFER_SAMPLES;
+        give_audio_buffer(audio_pool, buffer);
+    }
+}
+
+static void __no_inline_not_in_flash_func(core1_msx_music_audio)(void)
+{
+    while (true)
+    {
+        struct audio_buffer *buffer = take_audio_buffer_with_msx_music_io();
+        int16_t *samples = (int16_t *)buffer->buffer->bytes;
+        for (int i = 0; i < SCC_AUDIO_BUFFER_SAMPLES; i++)
+        {
+            msx_music_service_io();
+            int16_t s = msx_music_calc_sample();
+            samples[i * 2]     = s;
+            samples[i * 2 + 1] = s;
+        }
+        buffer->sample_count = SCC_AUDIO_BUFFER_SAMPLES;
+        give_audio_buffer(audio_pool, buffer);
+    }
 }
 
 // -----------------------------------------------------------------------
@@ -1157,6 +1483,34 @@ static void i2s_audio_init(void)
     scc_audio_ready = true;
 }
 
+static void __not_in_flash_func(dual_psg_start_audio)(void)
+{
+    if (!dual_psg_ready || dual_psg_audio_started)
+        return;
+
+    i2s_audio_init();
+    if (!audio_pool)
+        return;
+
+    dual_psg_io_core1 = true;
+    dual_psg_audio_started = true;
+    multicore_launch_core1(core1_dual_psg_audio);
+}
+
+static void __not_in_flash_func(msx_music_start_audio)(void)
+{
+    if (!msx_music_ready || msx_music_audio_started)
+        return;
+
+    i2s_audio_init();
+    if (!audio_pool)
+        return;
+
+    msx_music_io_core1 = true;
+    msx_music_audio_started = true;
+    multicore_launch_core1(core1_msx_music_audio);
+}
+
 // -----------------------------------------------------------------------
 // Konami SCC mapper with SCC sound emulation via I2S
 // -----------------------------------------------------------------------
@@ -1198,7 +1552,7 @@ void __no_inline_not_in_flash_func(loadrom_konamiscc_scc)(uint32_t offset, bool 
         }
 
         // --- handle read request ---
-        uint16_t addr = (uint16_t)pio_sm_get_blocking(msx_bus.pio, msx_bus.sm_read);
+        uint16_t addr = pio_get_read_servicing_dual_psg();
 
         // drain writes that arrived while waiting
         while (pio_try_get_write(&waddr, &wdata))
@@ -1283,7 +1637,7 @@ void __no_inline_not_in_flash_func(loadrom_ascii16)(uint32_t offset, bool cache_
     {
         pio_drain_writes(handle_ascii16_write, &ctx);
 
-        uint16_t addr = (uint16_t)pio_sm_get_blocking(msx_bus.pio, msx_bus.sm_read);
+        uint16_t addr = pio_get_read_servicing_dual_psg();
 
         pio_drain_writes(handle_ascii16_write, &ctx);
 
@@ -1960,7 +2314,7 @@ void __no_inline_not_in_flash_func(loadrom_neo8)(uint32_t offset)
     {
         pio_drain_writes(handle_neo8_write, &ctx);
 
-        uint16_t addr = (uint16_t)pio_sm_get_blocking(msx_bus.pio, msx_bus.sm_read);
+        uint16_t addr = pio_get_read_servicing_dual_psg();
 
         pio_drain_writes(handle_neo8_write, &ctx);
 
@@ -1998,7 +2352,7 @@ void __no_inline_not_in_flash_func(loadrom_neo16)(uint32_t offset)
     {
         pio_drain_writes(handle_neo16_write, &ctx);
 
-        uint16_t addr = (uint16_t)pio_sm_get_blocking(msx_bus.pio, msx_bus.sm_read);
+        uint16_t addr = pio_get_read_servicing_dual_psg();
 
         pio_drain_writes(handle_neo16_write, &ctx);
 
@@ -2035,7 +2389,7 @@ void __no_inline_not_in_flash_func(loadrom_planar64)(uint32_t offset, bool cache
 
     while (true)
     {
-        uint16_t addr = (uint16_t)pio_sm_get_blocking(msx_bus.pio, msx_bus.sm_read);
+        uint16_t addr = pio_get_read_servicing_dual_psg();
 
         bool in_window = true;
         uint8_t data = 0xFFu;
@@ -2352,7 +2706,7 @@ void __no_inline_not_in_flash_func(loadrom_ascii16x)(uint32_t offset, bool cache
     {
         pio_drain_writes(handle_ascii16x_write_cached, &state);
 
-        uint16_t addr = (uint16_t)pio_sm_get_blocking(msx_bus.pio, msx_bus.sm_read);
+        uint16_t addr = pio_get_read_servicing_dual_psg();
 
         pio_drain_writes(handle_ascii16x_write_cached, &state);
 
@@ -2587,6 +2941,7 @@ void __no_inline_not_in_flash_func(loadrom_manbow2)(uint32_t offset, bool cache_
         // Poll: drain write FIFO continuously while waiting for a read
         while (true)
         {
+            dual_psg_service_io();
             uint16_t waddr;
             uint8_t wdata;
             while (pio_try_get_write(&waddr, &wdata))
@@ -2656,6 +3011,212 @@ void __no_inline_not_in_flash_func(loadrom_manbow2)(uint32_t offset, bool cache_
     }
 }
 
+static inline void __not_in_flash_func(handle_ascii16x_write_simple)(uint16_t addr, uint8_t data, uint16_t *bank_regs)
+{
+    if (addr >= 0x6000u && addr <= 0x67FFu)
+        bank_regs[0] = data;
+    else if (addr >= 0x7000u && addr <= 0x77FFu)
+        bank_regs[1] = data;
+}
+
+void __no_inline_not_in_flash_func(loadrom_fmpac)(uint32_t offset, bool cache_enable, uint8_t base_rom_type)
+{
+    sunrise_wait_for_expanded_bootstrap();
+
+    pio_sm_set_enabled(pio0, 0, false);
+    pio_sm_set_enabled(pio0, 1, false);
+    gpio_init(PIN_WAIT);
+    gpio_set_dir(PIN_WAIT, GPIO_OUT);
+    gpio_put(PIN_WAIT, 0);
+
+    uint8_t bank8_regs[4] = {0, 1, 2, 3};
+    uint8_t ascii16_regs[2] = {0, 1};
+    uint16_t neo8_regs[6] = {0, 1, 2, 3, 4, 5};
+    uint16_t neo16_regs[3] = {0, 1, 2};
+    uint16_t ascii16x_regs[2] = {0, 0};
+
+    static const uint32_t MBW2_WRITABLE_SECTOR_SIZE = 0x10000u;
+    static const uint32_t MBW2_WRITABLE_SECTOR_OFFSET = 0x70000u;
+    uint8_t *mbw2_writable_sram = &rom_sram[CACHE_SIZE - MBW2_WRITABLE_SECTOR_SIZE];
+    manbow2_ctx_t mb = {
+        .bank_regs = {0, 1, 2, 3},
+        .state = MBW2_READ,
+        .writable_sram = mbw2_writable_sram,
+        .writable_offset = MBW2_WRITABLE_SECTOR_OFFSET,
+        .writable_size = MBW2_WRITABLE_SECTOR_SIZE,
+        .rom_size_mask = 0
+    };
+
+    if (base_rom_type == 14u)
+        rom_cache_capacity = CACHE_SIZE - MBW2_WRITABLE_SECTOR_SIZE;
+
+    const uint8_t *rom_base;
+    uint32_t available_length;
+    prepare_rom_source(offset, cache_enable, 0u, &rom_base, &available_length);
+    const uint8_t *fmpac_bios_base = rom + offset + active_rom_size;
+
+    if (base_rom_type == 14u)
+    {
+        const uint8_t *flash_rom = rom + offset;
+        if (available_length >= MBW2_WRITABLE_SECTOR_OFFSET + MBW2_WRITABLE_SECTOR_SIZE)
+        {
+            memcpy(mbw2_writable_sram, flash_rom + MBW2_WRITABLE_SECTOR_OFFSET, MBW2_WRITABLE_SECTOR_SIZE);
+        }
+        else if (available_length > MBW2_WRITABLE_SECTOR_OFFSET)
+        {
+            uint32_t partial = available_length - MBW2_WRITABLE_SECTOR_OFFSET;
+            memcpy(mbw2_writable_sram, flash_rom + MBW2_WRITABLE_SECTOR_OFFSET, partial);
+            memset(mbw2_writable_sram + partial, 0xFF, MBW2_WRITABLE_SECTOR_SIZE - partial);
+        }
+        else
+        {
+            memset(mbw2_writable_sram, 0xFF, MBW2_WRITABLE_SECTOR_SIZE);
+        }
+    }
+
+    uint8_t subslot_reg = 0x00u;
+    static fmpac_state_t fmpac;
+    memset(&fmpac, 0, sizeof(fmpac));
+    fmpac.control = 0x10u;
+
+    bank8_ctx_t bank8_ctx = { .bank_regs = bank8_regs };
+    bank8_ctx_t ascii16_ctx = { .bank_regs = ascii16_regs };
+    bank16_ctx_t neo8_ctx = { .bank_regs = neo8_regs };
+    bank16_ctx_t neo16_ctx = { .bank_regs = neo16_regs };
+
+    msx_pio_bus_init();
+
+    while (true)
+    {
+        uint16_t waddr;
+        uint8_t wdata;
+        while (pio_try_get_write(&waddr, &wdata))
+        {
+            if (waddr == 0xFFFFu)
+            {
+                subslot_reg = wdata;
+                continue;
+            }
+
+            uint8_t page = (waddr >> 14) & 0x03u;
+            uint8_t active_subslot = (subslot_reg >> (page * 2)) & 0x03u;
+            if (active_subslot == 0)
+            {
+                switch (base_rom_type)
+                {
+                    case 3:  handle_konamiscc_write(waddr, wdata, &bank8_ctx); break;
+                    case 5:  handle_ascii8_write(waddr, wdata, &bank8_ctx); break;
+                    case 6:  handle_ascii16_write(waddr, wdata, &ascii16_ctx); break;
+                    case 7:  handle_konami_write(waddr, wdata, &bank8_ctx); break;
+                    case 8:  handle_neo8_write(waddr, wdata, &neo8_ctx); break;
+                    case 9:  handle_neo16_write(waddr, wdata, &neo16_ctx); break;
+                    case 12: handle_ascii16x_write_simple(waddr, wdata, ascii16x_regs); break;
+                    case 14: handle_manbow2_write(waddr, wdata, &mb); break;
+                }
+            }
+            else if (active_subslot == 3)
+            {
+                fmpac_handle_write(&fmpac, waddr, wdata);
+            }
+        }
+
+        if (!pio_sm_is_rx_fifo_empty(msx_bus.pio, msx_bus.sm_read))
+        {
+            uint16_t addr = (uint16_t)pio_sm_get(msx_bus.pio, msx_bus.sm_read);
+            uint8_t data = 0xFFu;
+            bool in_window = true;
+
+            if (addr == 0xFFFFu)
+            {
+                data = (uint8_t)~subslot_reg;
+            }
+            else
+            {
+                uint8_t page = (addr >> 14) & 0x03u;
+                uint8_t active_subslot = (subslot_reg >> (page * 2)) & 0x03u;
+                if (active_subslot == 0)
+                {
+                    uint32_t rel = 0;
+                    bool mapped = false;
+
+                    switch (base_rom_type)
+                    {
+                        case 1:
+                        case 2:
+                            mapped = (addr >= 0x4000u && addr <= 0xBFFFu);
+                            rel = addr - 0x4000u;
+                            break;
+                        case 3:
+                        case 5:
+                        case 7:
+                            mapped = (addr >= 0x4000u && addr <= 0xBFFFu);
+                            if (mapped)
+                                rel = ((uint32_t)bank8_regs[(addr - 0x4000u) >> 13] << 13) | (addr & 0x1FFFu);
+                            break;
+                        case 4:
+                            mapped = (addr <= 0xBFFFu);
+                            rel = addr;
+                            break;
+                        case 6:
+                            mapped = (addr >= 0x4000u && addr <= 0xBFFFu);
+                            if (mapped)
+                                rel = ((uint32_t)ascii16_regs[(addr >> 15) & 1u] << 14) | (addr & 0x3FFFu);
+                            break;
+                        case 8:
+                            mapped = (addr <= 0xBFFFu);
+                            if (mapped && (addr >> 13) < 6u)
+                                rel = ((uint32_t)(neo8_regs[addr >> 13] & 0x0FFFu) << 13) | (addr & 0x1FFFu);
+                            break;
+                        case 9:
+                            mapped = (addr <= 0xBFFFu);
+                            if (mapped && (addr >> 14) < 3u)
+                                rel = ((uint32_t)(neo16_regs[addr >> 14] & 0x0FFFu) << 14) | (addr & 0x3FFFu);
+                            break;
+                        case 12:
+                            mapped = true;
+                            rel = ((uint32_t)ascii16x_regs[((addr >> 14) & 1u) ? 0u : 1u] << 14) | (addr & 0x3FFFu);
+                            break;
+                        case 13:
+                            mapped = true;
+                            rel = addr;
+                            break;
+                        case 14:
+                            mapped = (addr >= 0x4000u && addr <= 0xBFFFu);
+                            if (mapped)
+                            {
+                                uint8_t mb_page = (uint8_t)((addr - 0x4000u) >> 13);
+                                rel = ((uint32_t)mb.bank_regs[mb_page] << 13) | (addr & 0x1FFFu);
+                                if (mb.state == MBW2_AUTOSELECT)
+                                {
+                                    uint32_t id_addr = rel & 0x03u;
+                                    data = (id_addr == 0x00u) ? 0x01u : (id_addr == 0x01u) ? 0xA4u : (id_addr == 0x02u) ? ((rel >= mb.writable_offset && rel < mb.writable_offset + mb.writable_size) ? 0x00u : 0x01u) : 0x00u;
+                                    mapped = false;
+                                }
+                                else if (rel >= mb.writable_offset && rel < mb.writable_offset + mb.writable_size)
+                                {
+                                    data = mbw2_writable_sram[rel - mb.writable_offset];
+                                    mapped = false;
+                                }
+                            }
+                            break;
+                    }
+
+                    if (mapped && (available_length == 0u || rel < available_length))
+                        data = read_rom_byte(rom_base, rel);
+                }
+                else if (active_subslot == 3 && addr >= 0x4000u && addr <= 0x7FFFu)
+                {
+                    data = fmpac_handle_read(&fmpac, fmpac_bios_base, addr);
+                }
+            }
+
+            pio_sm_put_blocking(msx_bus.pio, msx_bus.sm_read, pio_build_token(in_window, data));
+        }
+
+        tight_loop_contents();
+    }
+}
+
 // -----------------------------------------------------------------------
 // loadrom_manbow2_scc - Manbow2 mapper with SCC/SCC+ sound emulation
 // -----------------------------------------------------------------------
@@ -2713,6 +3274,8 @@ void __no_inline_not_in_flash_func(loadrom_manbow2_scc)(uint32_t offset, bool ca
 
     // Start I2S audio subsystem, then launch audio on Core 1
     i2s_audio_init();
+    if (dual_psg_ready)
+        dual_psg_io_core1 = true;
     multicore_launch_core1(core1_scc_audio);
 
     msx_pio_bus_init();
@@ -2724,6 +3287,7 @@ void __no_inline_not_in_flash_func(loadrom_manbow2_scc)(uint32_t offset, bool ca
         // Poll: drain write FIFO continuously while waiting for a read
         while (true)
         {
+            dual_psg_service_io();
             uint16_t waddr;
             uint8_t wdata;
             while (pio_try_get_write(&waddr, &wdata))
@@ -3520,10 +4084,8 @@ int __no_inline_not_in_flash_func(main)()
     memcpy(rom_name, rom, ROM_NAME_MAX);
     uint8_t rom_type = rom[ROM_NAME_MAX];
 
-    bool scc_emulation = (rom_type & SCC_FLAG) != 0;
-    bool scc_plus = (rom_type & SCC_PLUS_FLAG) != 0;
     bool wifi_enabled = (rom_type & WIFI_FLAG) != 0;
-    uint8_t base_rom_type = rom_type & ~(SCC_FLAG | SCC_PLUS_FLAG | WIFI_FLAG);
+    uint8_t base_rom_type = rom_type & ~(SCC_FLAG | SCC_PLUS_FLAG | WIFI_FLAG | DUAL_PSG_FLAG | MSX_MUSIC_FLAG);
 
     if ((base_rom_type == 11u || base_rom_type == 16u
          || base_rom_type == 17u || base_rom_type == 18u) && !psram_init())
@@ -3537,6 +4099,48 @@ int __no_inline_not_in_flash_func(main)()
     uint32_t rom_size;
     memcpy(&rom_size, rom + ROM_NAME_MAX + 1, sizeof(uint32_t));
     active_rom_size = rom_size;
+
+    // Resolve which (single) on-cartridge audio engine to enable. The
+    // resolver enforces mutual exclusion: only one of SCC / SCC+ / dual
+    // PSG / MSX-MUSIC (or any future chip) can be active per ROM.
+    bool system_mode = base_rom_type >= 10u && base_rom_type <= 18u && base_rom_type != 12u && base_rom_type != 13u && base_rom_type != 14u;
+    audio_mode_t audio_mode = resolve_audio_mode(rom_type, base_rom_type, system_mode);
+    bool scc_emulation = (audio_mode == AUDIO_MODE_SCC);
+    bool scc_plus      = (audio_mode == AUDIO_MODE_SCC_PLUS);
+
+    switch (audio_mode)
+    {
+        case AUDIO_MODE_MSX_MUSIC:
+            msx_music_enabled = true;
+            msx_music_init();
+            msx_music_start_audio();
+            break;
+
+        case AUDIO_MODE_DUAL_PSG:
+            // Standalone PSG-only engine; the tool rejects Dual PSG for
+            // SCC-capable mappers before this configuration is generated.
+            dual_psg_enabled = true;
+            dual_psg_init();
+            dual_psg_start_audio();
+            break;
+
+        case AUDIO_MODE_SCC:
+        case AUDIO_MODE_SCC_PLUS:
+            // The Konami-SCC / Manbow2 mapper handlers initialise the SCC
+            // engine and launch its audio core1 themselves so they have
+            // access to their own bank state.
+            break;
+
+        case AUDIO_MODE_NONE:
+        default:
+            break;
+    }
+
+    if (audio_mode == AUDIO_MODE_MSX_MUSIC)
+    {
+        loadrom_fmpac(ROM_RECORD_SIZE, true, base_rom_type);
+        return 0;
+    }
 
     switch (base_rom_type)
     {
