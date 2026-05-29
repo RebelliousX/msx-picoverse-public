@@ -32,6 +32,7 @@ static void send_query_to_pico(const char *query);
 static unsigned int read_match_index(void);
 static unsigned int bios_calatr(void);
 int record_is_folder(const ROMRecord *record);
+int record_is_mp3(const ROMRecord *record);
 void trim_name_to_buffer(const char *src, char *dst, int max_len);
 static void build_menu_row_text(const ROMRecord *record, const char *name_override, char *out, unsigned char width);
 static void enter_directory(const char *name);
@@ -169,8 +170,12 @@ int record_is_folder(const ROMRecord *record) {
     return (record->Mapper & FOLDER_FLAG) != 0;
 }
 
+int record_is_mp3(const ROMRecord *record) {
+    return (record->Mapper & MP3_FLAG) != 0;
+}
+
 unsigned char record_mapper_code(unsigned char mapper) {
-    unsigned char raw = mapper & ~(SOURCE_SD_FLAG | FOLDER_FLAG);
+    unsigned char raw = mapper & ~(SOURCE_SD_FLAG | FOLDER_FLAG | MP3_FLAG);
 
     if (raw == OVERRIDE_FLAG) {
         return 16;
@@ -197,6 +202,9 @@ static void build_menu_row_text(const ROMRecord *record, const char *name_overri
 
     if (record_is_folder(record)) {
         type_label = "<DIR>";
+        source = "SD";
+    } else if (record_is_mp3(record)) {
+        type_label = " MP3";
         source = "SD";
     }
 
@@ -284,6 +292,7 @@ void trim_name_to_buffer(const char *src, char *dst, int max_len) {
 static void enter_directory(const char *name) {
     char folder[CTRL_QUERY_SIZE];
     const char *loading_text = status_text("Loading...", "Loading folder...");
+    Poke(MP3_CTRL_CMD, MP3_CMD_STOP);
     if (name) {
         trim_name_to_buffer(name, folder, CTRL_QUERY_SIZE - 1);
     } else {
@@ -641,6 +650,7 @@ static void redefine_function_keys(void) {
 static void switch_browse_source(unsigned char source_mode, const char *loading_text) {
     unsigned char payload[2];
 
+    Poke(MP3_CTRL_CMD, MP3_CMD_STOP);
     menu_shortcut_selection = (source_mode == SOURCE_MODE_SD) ? MENU_SHORTCUT_MICROSD : MENU_SHORTCUT_FLASH;
     menu_ui_update_footer_page();
     payload[0] = source_mode;
@@ -853,10 +863,11 @@ void helpMenu()
 void loadGame(int index) 
 {
     ROMRecord *record = &records[index % FILES_PER_PAGE];
-    if (record_is_folder(record))
+    if (record_is_folder(record) || record_is_mp3(record))
     {
         return;
     }
+    Poke(MP3_CTRL_CMD, MP3_CMD_STOP);
     if ((record->Mapper & ~SOURCE_SD_FLAG) != 0)
     {
         Poke(ROM_SELECT_REGISTER, index); // Set the game index (absolute)

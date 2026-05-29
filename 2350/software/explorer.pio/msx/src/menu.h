@@ -21,11 +21,13 @@
 #define MAX_FILE_NAME_LENGTH 60     // Maximum size of the ROM name
 #define ROM_RECORD_SIZE (MAX_FILE_NAME_LENGTH + 1 + sizeof(unsigned long) + sizeof(unsigned long))  // Size of the ROM record in bytes
 #define MAX_ROM_RECORDS 65535 // Maximum ROM files supported (counter limit)
+#define SD_ROM_MAX_SIZE_KB 4096 // 4 MB PSRAM region capacity for microSD-loaded ROMs
 #define MEMORY_START 0xB900 // Start of the memory area to read the ROM records
 #define ROM_SELECT_REGISTER 0xBF7F // Memory-mapped register that selects the ROM to load
 #define JIFFY 0xFC9E
 #define SOURCE_SD_FLAG 0x80
 #define FOLDER_FLAG 0x40
+#define MP3_FLAG 0x20
 #define OVERRIDE_FLAG 0x10
 #define NAME_COL_WIDTH 22
 #define NAME_COL_WIDTH_80 60
@@ -43,6 +45,7 @@
 #define CTRL_ACK     (CTRL_BASE_ADDR + 8)
 #define CTRL_AUDIO   (CTRL_BASE_ADDR + 9)
 #define CTRL_WIFI_SUPPORT (CTRL_BASE_ADDR + 10)
+#define CTRL_PSG_EMULATION (CTRL_BASE_ADDR + 11)
 #define CTRL_MAGIC   0xA5
 #define CTRL_QUERY_BASE 0xBFC0
 #define CTRL_QUERY_SIZE 32
@@ -51,6 +54,24 @@
 #define AUDIO_PROFILE_SCC_PLUS 2
 #define AUDIO_PROFILE_DUAL_PSG 3
 #define AUDIO_PROFILE_MSX_MUSIC 4
+#define MP3_CTRL_BASE      0xBFE0
+#define MP3_CTRL_CMD       (MP3_CTRL_BASE + 0)
+#define MP3_CTRL_STATUS    (MP3_CTRL_BASE + 1)
+#define MP3_CTRL_INDEX_L   (MP3_CTRL_BASE + 2)
+#define MP3_CTRL_INDEX_H   (MP3_CTRL_BASE + 3)
+#define MP3_CTRL_ELAPSED_L (MP3_CTRL_BASE + 4)
+#define MP3_CTRL_ELAPSED_H (MP3_CTRL_BASE + 5)
+#define MP3_CTRL_TOTAL_L   (MP3_CTRL_BASE + 6)
+#define MP3_CTRL_TOTAL_H   (MP3_CTRL_BASE + 7)
+#define MP3_STATUS_PLAYING 0x01
+#define MP3_STATUS_ERROR   0x04
+#define MP3_STATUS_EOF     0x08
+#define MP3_STATUS_PAUSED  0x40
+#define MP3_CMD_SELECT     0x01
+#define MP3_CMD_PLAY       0x02
+#define MP3_CMD_STOP       0x03
+#define MP3_CMD_PAUSE      0x04
+#define MP3_CMD_RESUME     0x05
 #define DATA_BUFFER_END CTRL_FH_STATUS_TEXT_BASE
 #define DATA_BUFFER_SIZE (DATA_BUFFER_END - MEMORY_START)
 #define CMD_APPLY_FILTER 0x01
@@ -134,6 +155,7 @@ char* mapper_description(int number);
 unsigned char record_mapper_code(unsigned char mapper);
 int record_mapper_is_override(unsigned char mapper);
 int record_is_folder(const ROMRecord *record);
+int record_is_mp3(const ROMRecord *record);
 void trim_name_to_buffer(const char *src, char *dst, int max_len);
 int build_sliding_name_window(const char *str, int startPos, char *out, unsigned char width);
 void displayMenu();

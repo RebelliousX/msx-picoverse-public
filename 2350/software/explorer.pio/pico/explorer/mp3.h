@@ -10,6 +10,7 @@
 #define MP3_STATUS_EOF      0x08
 #define MP3_STATUS_BUSY     0x10
 #define MP3_STATUS_READING  0x20
+#define MP3_STATUS_PAUSED   0x40
 
 // Callback type for background work (called between MP3 frames on Core 1)
 typedef void (*mp3_bg_callback_t)(void);
@@ -32,7 +33,9 @@ void mp3_send_cmd(uint8_t cmd);
 
 #define MP3_CMD_PLAY        2
 #define MP3_CMD_STOP        3
-#define MP3_CMD_TOGGLE_MUTE 4
+#define MP3_CMD_PAUSE       4
+#define MP3_CMD_RESUME      5
+#define MP3_CMD_TOGGLE_MUTE 6
 
 // Play modes for auto-advance
 #define MP3_PLAY_MODE_SINGLE 0

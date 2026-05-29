@@ -32,6 +32,7 @@ static void fh_draw_status_left(const char *text);
 static const char *fh_status_text(const char *text_40, const char *text_80);
 static void fh_blink_status_tick(const char *text, unsigned char *blink_state, unsigned char *blink_tick);
 static void fh_wait_ready_status(const char *text);
+static unsigned char fh_record_fits_sd_cache(const ExplorerFHRecord *record);
 
 static unsigned int fh_read_u16(unsigned int addr)
 {
@@ -172,6 +173,11 @@ static void fh_wait_download_ready(void)
         }
         delay_ms(100);
     }
+}
+
+static unsigned char fh_record_fits_sd_cache(const ExplorerFHRecord *record)
+{
+    return record && record->size_kb <= SD_ROM_MAX_SIZE_KB;
 }
 
 static void fh_read_page_records(void)
@@ -494,6 +500,7 @@ static void fh_render_detail_screen(const ExplorerFHRecord *record)
 {
     char name[CTRL_QUERY_SIZE];
     char size_text[8];
+    unsigned char can_download = fh_record_fits_sd_cache(record);
 
     Locate(0, 0);
     menu_ui_print_title_line();
@@ -521,8 +528,14 @@ static void fh_render_detail_screen(const ExplorerFHRecord *record)
     Locate(0, 5);
     printf(" Source: FH");
 
-    menu_ui_render_selectable_line(9, "Action: Download", 1);
-    fh_draw_detail_status("");
+    menu_ui_render_selectable_line(9, can_download ? "Action: Download" : "Action: Too large", 1);
+    if (can_download) {
+        fh_draw_detail_status("");
+    } else if (use_80_columns) {
+        fh_draw_detail_status("File exceeds 4MB microSD launch limit.");
+    } else {
+        fh_draw_detail_status("Too large for microSD launch.");
+    }
     Locate(0, 21);
     menu_ui_print_delimiter_line();
     fh_render_detail_footer();
@@ -565,6 +578,14 @@ static void fh_show_detail(unsigned int index)
             }
         }
         if (key == 13 || key == ' ') {
+            if (!fh_record_fits_sd_cache(record)) {
+                if (use_80_columns) {
+                    fh_draw_detail_status("Download blocked: exceeds 4MB microSD launch limit.");
+                } else {
+                    fh_draw_detail_status("Download blocked: too large.");
+                }
+                continue;
+            }
             fh_network_status_with_text(fh_status_text("Downloading...", "Downloading..."));
             fh_render_detail_screen(record);
             fh_download(index);

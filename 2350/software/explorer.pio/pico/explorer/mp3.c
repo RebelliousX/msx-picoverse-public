@@ -15,6 +15,16 @@
 #define MP3_I2S_WSEL_PIN 31
 #define MP3_I2S_MUTE_PIN 32
 
+#ifndef PICO_AUDIO_I2S_PIO
+#define PICO_AUDIO_I2S_PIO 0
+#endif
+
+#if PICO_AUDIO_I2S_PIO == 1
+#define MP3_I2S_PIO pio1
+#else
+#define MP3_I2S_PIO pio0
+#endif
+
 #define MP3_BUFFER_FALLBACK 65536
 #define MP3_READ_ERROR_LIMIT 8
 #define MP3_I2S_BUFFER_SAMPLES 1152
@@ -31,7 +41,7 @@ static struct audio_i2s_config i2s_config = {
     .data_pin = MP3_I2S_DATA_PIN,
     .clock_pin_base = MP3_I2S_BCLK_PIN,
     .dma_channel = 0,
-    .pio_sm = 0,
+    .pio_sm = 2,
 };
 static bool i2s_ready = false;
 static audio_format_t audio_format = {
@@ -68,6 +78,7 @@ static uint32_t sample_rate = DEFAULT_SAMPLE_RATE;
 static uint64_t elapsed_samples = 0;
 
 static bool playing = false;
+static bool paused = false;
 static bool muted = false;
 static bool eof = false;
 static bool error_flag = false;
@@ -81,7 +92,9 @@ static bool error_flag = false;
 #define MP3_CORE_CMD_SELECT      1
 #define MP3_CORE_CMD_PLAY        2
 #define MP3_CORE_CMD_STOP        3
-#define MP3_CORE_CMD_TOGGLE_MUTE 4
+#define MP3_CORE_CMD_PAUSE       4
+#define MP3_CORE_CMD_RESUME      5
+#define MP3_CORE_CMD_TOGGLE_MUTE 6
 
 #define MP3_CORE_CMD_QUEUE_SIZE 8u
 static volatile uint8_t  core_cmd_queue[MP3_CORE_CMD_QUEUE_SIZE];
@@ -103,6 +116,12 @@ void mp3_set_external_buffer(uint8_t *buffer, size_t size) {
 
 static int mp3_dma_channel = -1;
 
+static void i2s_release_sm(void) {
+    if (pio_sm_is_claimed(MP3_I2S_PIO, i2s_config.pio_sm)) {
+        pio_sm_unclaim(MP3_I2S_PIO, i2s_config.pio_sm);
+    }
+}
+
 static bool i2s_start(void) {
     const struct audio_format *output_format = audio_i2s_setup(&audio_format, &i2s_config);
     if (!output_format || !audio_i2s_connect(audio_pool)) {
@@ -122,10 +141,8 @@ static void i2s_stop(void) {
     if (mp3_dma_channel >= 0) {
         dma_channel_abort(mp3_dma_channel);
     }
-    // Release PIO resources so i2s_start() can reclaim them
-    // (audio_i2s_setup calls pio_sm_claim internally)
-    pio_sm_unclaim(pio0, i2s_config.pio_sm);
-    pio_clear_instruction_memory(pio0);
+    // Release only the I2S state machine; the MSX bus PIO programs stay live.
+    i2s_release_sm();
     i2s_ready = false;
 }
 
@@ -153,6 +170,7 @@ static void update_status_flags(void) {
     if (muted) flags |= MP3_STATUS_MUTED;
     if (error_flag) flags |= MP3_STATUS_ERROR;
     if (eof) flags |= MP3_STATUS_EOF;
+    if (paused) flags |= MP3_STATUS_PAUSED;
     status_flags = flags;
 }
 
@@ -176,6 +194,7 @@ static void reset_decoder_state(void) {
     elapsed_seconds = 0;
     total_seconds = 0;
     total_seconds_estimated = false;
+    paused = false;
     // Do NOT reset sample_rate / audio_format.sample_freq here.
     // They must reflect the actual I2S hardware rate so the decode
     // loop can detect a mismatch and call i2s_restart() when needed.
@@ -282,9 +301,8 @@ void mp3_deinit(void) {
         audio_i2s_set_enabled(false);
         i2s_ready = false;
 
-        // Unclaim PIO state machine and clear I2S program from pio0
-        pio_sm_unclaim(pio0, i2s_config.pio_sm);
-        pio_clear_instruction_memory(pio0);
+        // Release only the I2S state machine; the MSX bus PIO programs stay live.
+        i2s_release_sm();
     }
 
     // Release DMA channel
@@ -306,6 +324,7 @@ void mp3_deinit(void) {
     mp3_buf_pos = 0;
     eof = false;
     error_flag = false;
+    paused = false;
     status_flags = 0;
 }
 
@@ -353,6 +372,7 @@ void mp3_init(void) {
 static void mp3_do_select(const char *path, uint32_t file_size) {
     printf("MP3: select '%s' size=%lu\n", path ? path : "(null)", (unsigned long)file_size);
     playing = false;
+    paused = false;
     close_file();
 
     reset_decoder_state();
@@ -447,6 +467,7 @@ static void mp3_do_play(void) {
             reset_decoder_state();
         }
         playing = true;
+        paused = false;
         eof = false;
         if (total_seconds == 0 && mp3_file_size > 0) {
             uint64_t bits = (uint64_t)mp3_file_size * 8ull;
@@ -463,8 +484,32 @@ static void mp3_do_stop(void) {
     printf("MP3: stop\n");
     set_mute(true);  // Mute when stopping
     playing = false;
+    paused = false;
     close_file();
     reset_decoder_state();
+    update_status_flags();
+}
+
+static void mp3_do_pause(void) {
+    printf("MP3: pause\n");
+    if (playing) {
+        playing = false;
+        paused = true;
+        set_mute(true);
+    }
+    update_status_flags();
+}
+
+static void mp3_do_resume(void) {
+    printf("MP3: resume\n");
+    if (paused && file_open && !error_flag) {
+        paused = false;
+        playing = true;
+        eof = false;
+        set_mute(false);
+    } else if (!file_open && mp3_selected_path[0] != '\0') {
+        mp3_do_play();
+    }
     update_status_flags();
 }
 
@@ -493,6 +538,12 @@ static void mp3_process_commands(void) {
             break;
         case MP3_CORE_CMD_STOP:
             mp3_do_stop();
+            break;
+        case MP3_CORE_CMD_PAUSE:
+            mp3_do_pause();
+            break;
+        case MP3_CORE_CMD_RESUME:
+            mp3_do_resume();
             break;
         case MP3_CORE_CMD_TOGGLE_MUTE:
             mp3_do_toggle_mute();

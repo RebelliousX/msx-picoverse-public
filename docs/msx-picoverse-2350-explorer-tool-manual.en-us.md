@@ -7,7 +7,7 @@ The Explorer tool creates a UF2 image that flashes the PicoVerse 2350 cartridge 
 - The ROM payloads that will live in Pico flash.
 - The integrated File Hunter browser and WiFi configuration support used by the Explorer menu.
 
-Use the Explorer tool when you want a menu that loads ROMs from flash, microSD, and the online File Hunter catalog on the PicoVerse 2350, or if you want to explore advanced features like MP3 playback, SCC/SCC+ audio, Dual PSG audio, and MSX-MUSIC on your MSX computer.
+Use the Explorer tool when you want a menu that loads ROMs from flash, microSD, and the online File Hunter catalog on the PicoVerse 2350, or if you want to explore advanced features like microSD MP3 playback, SCC/SCC+ audio, Dual PSG audio, MSX-MUSIC, and optional primary PSG mirroring through the cartridge DAC on your MSX computer.
 
 ## Requirements
 
@@ -43,8 +43,8 @@ Use the Explorer tool when you want a menu that loads ROMs from flash, microSD, 
 - **File Hunter browser**: Press `F3` to browse online ROM results from File Hunter through the ESP-01 WiFi module. Results show the ROM name, size, and source, and selected ROMs can be downloaded and saved to the microSD root.
 - **WiFi configuration**: Press `F4` to enter the WiFi setup flow used by the ESP8266P-compatible WiFi firmware.
 - **Automatic detection** of MSX models that support 80-column text mode. Compatible machines boot the menu in 80 columns; others fall back to 40 columns, and you can press `C` at any time to toggle between layouts.
-- MP3 entries are listed in the menu with a "MP3" type label and open an **MP3 player** screen when selected.
-- ROM entries open a ROM screen that lets you inspect mapper detection, choose **audio profiles** including SCC/SCC+, Dual PSG, or MSX-MUSIC where supported, and enable optional WiFi support for Sunrise Nextor entries before running.
+- MP3 entries from the microSD card are listed in the menu with a "MP3" type label and open an **MP3 player** screen when selected.
+- ROM entries open a ROM screen that lets you inspect mapper detection, choose **audio profiles** including SCC/SCC+, Dual PSG, or MSX-MUSIC where supported, enable optional primary **PSG** mirroring to the DAC, and enable optional WiFi support for Sunrise Nextor entries before running.
 
 ## Command-line usage
 
@@ -221,41 +221,25 @@ When the save succeeds, the detail screen shows "Saved to microSD. Press key." P
 
 ## MP3 player screen
 
-Selecting an MP3 entry opens a dedicated player screen with playback controls, mode selection, and a visualizer.
+Selecting an MP3 entry from the microSD card opens a dedicated player screen. MP3 files are not embedded in flash by the Explorer tool; copy them to the microSD card root or to folders on the card, then open the microSD list with `F2`.
 
-The screen displays four selectable options arranged vertically:
+The player screen shows the MP3 file name, size, playback status, and elapsed play time. The elapsed counter is refreshed while the screen is open. Total duration is not shown because Explorer does not scan the whole MP3 stream before playback.
 
-1. **Action**: Play or Stop the current MP3 file.
-2. **Mute**: Toggle audio mute on/off.
-3. **Mode**: Select playback mode (Single, All, or Random).
-4. **Visualizer**: Toggle the audio visualizer on/off.
+The screen displays two selectable action rows:
+
+1. **Action: Play / Stop**: starts playback when stopped, or stops the current file when playing or paused.
+2. **Action: Pause / Resume**: pauses the current playback, or resumes it after pausing.
 
 ### Controls
 
-- **Up/Down**: Move between the four selectable options.
-- **Enter**: Toggle or cycle the selected option:
-  - **Action**: Plays the file if stopped, or stops if playing.
-  - **Mute**: Toggles mute on/off.
-  - **Mode**: Cycles through Single → All → Random → Single.
-  - **Visualizer**: Toggles the audio visualizer on/off.
-- **Esc**: Stop playback (if playing) and return to the menu.
-- **C**: Toggle 40/80-column layout (supported systems only).
+- **Up/Down**: Move between the action rows.
+- **Enter/Space**: Execute the selected action.
+- **Esc**: Stop playback and return to the Explorer list.
+- **C**: Toggle 40/80-column layout on supported systems.
 
-### Playback modes
+### Audio behavior
 
-- **Single**: Plays only the selected MP3 file. When the song ends, playback stops.
-- **All**: Automatically plays all MP3 files in the current folder in sequence. After the last file finishes, playback loops back to the first MP3 file in the folder.
-- **Random**: Automatically plays MP3 files from the current folder in random order. After each file ends, a random MP3 file from the folder is selected and played.
-
-The playback mode is displayed in the Mode line (e.g., "Mode: All"). When a new file starts playing in All or Random mode, the file name and size are automatically updated on the screen.
-
-### Status display
-
-Status details are shown at the bottom of the screen, including:
-- **Play/Stop state**: "PLAY" or "STOP"
-- **Elapsed time**: Current playback position in MM:SS format
-- **Mute indicator**: "MUTE" when muted, blank when unmuted
-- **Error indicator**: "ERR" if an error occurs, blank otherwise
+MP3 decoding runs on the Pico side and streams stereo PCM to the cartridge I2S DAC. The MSX menu remains responsive while playback is active. The DAC mute line is released only while MP3 or ROM audio is active, and is muted again when playback stops or when Explorer returns to idle browsing.
 
 ## ROM screen
 
@@ -263,6 +247,7 @@ Selecting a ROM entry opens a ROM details screen before running:
 
 - **Mapper**: Shows the detected mapper (for SD ROMs) and allows manual override using Left/Right.
 - **Audio**: Choose an audio profile with Left/Right (None, SCC, SCC+, Dual PSG, MSX-MUSIC). The menu only cycles through profiles supported by the selected ROM mapper.
+- **PSG**: Choose whether to mirror the MSX primary PSG writes through the cartridge DAC. The default is No.
 - **Wifi**: For Sunrise Nextor entries only, choose whether to expose the ESP8266P WiFi BIOS before running. The default is No.
 - **Action: Run**: Press Enter to launch the ROM.
 - **Esc**: Return to the menu without running.
@@ -271,7 +256,7 @@ If a ROM mapper is unknown, the screen will briefly show "Detecting..." while th
 
 ### Audio profile options
 
-- **None**: No sound emulation. The ROM runs with its original audio through the MSX's built-in PSG (if the game uses PSG sound).
+- **None**: No extra cartridge audio profile. The ROM still uses the MSX's built-in PSG normally.
 - **SCC**: Enables Konami SCC (standard) sound emulation. Use this for games that use the standard SCC chip with shared channel 4/5 waveforms (e.g., *Space Manbow*, *Salamander*, *Nemesis 2*, *Gradius 2*).
 - **SCC+**: Enables Konami SCC+ (enhanced/SCC-I) sound emulation. Use this for games or homebrew that require SCC+ features with independent channel 4/5 waveforms.
 - **Dual PSG**: Enables a secondary AY-3-8910 compatible PSG on I/O ports `0x10` (register select) and `0x11` (data write), matching the common Carnivore2 / MegaFlashROM / FlashJacks style second-PSG convention. Use this for ROMs or patches that explicitly support dual PSG music.
@@ -279,9 +264,13 @@ If a ROM mapper is unknown, the screen will briefly show "Detecting..." while th
 
 Explorer treats audio profiles as mutually exclusive: a ROM can run with no extra audio, SCC, SCC+, Dual PSG, or MSX-MUSIC, but not multiple cartridge audio engines at the same time.
 
+The **PSG** field is independent from the Audio profile. When set to **Yes**, Explorer mirrors writes to the primary MSX PSG ports `0xA0` and `0xA1`, generates matching AY/YM audio on the Pico, and sends that audio through the cartridge I2S DAC. The real MSX PSG is not disabled; the option provides a DAC-side copy of the main PSG. It can be combined with **None**, **SCC**, **SCC+**, **Dual PSG**, or **MSX-MUSIC**, so PSG music can be heard through the cartridge DAC together with the selected cartridge audio profile. The option defaults to **No** each time the ROM screen is opened.
+
 The SCC and SCC+ audio profiles work with ROMs using the Konami SCC mapper (`KonSCC`) or the Manbow2 mapper (`MANBW2`). When a ROM is detected as `KonSCC` or `MANBW2`, the ROM screen pre-selects **SCC** in the Audio field; you can change it to None or SCC+ before pressing Run. Dual PSG and MSX-MUSIC are not offered for these mappers because the cartridge audio slot is reserved for SCC/SCC+.
 
 The Dual PSG and MSX-MUSIC profiles are available for regular non-SYSTEM ROMs that are not Konami SCC or Manbow2. They are not offered for Sunrise/Nextor SYSTEM entries, NEO system entries, folders, or SCC-capable ROMs.
+
+Primary PSG mirroring is intended for normal ROM launches from flash or microSD, including ROMs downloaded from File Hunter after they have been saved to the card. SYSTEM/storage entries that reserve core 1 for storage backends do not use the PSG DAC mirror path.
 
 ## SCC/SCC+ sound emulation
 
@@ -295,6 +284,14 @@ The MSX's internal PSG remains active as usual. The Dual PSG profile adds the ex
 
 For firmware architecture, port handling, audio routing, and LoadROM/Explorer differences, see the [PicoVerse 2350 Dual PSG implementation guide](./msx-picoverse-2350-dualpsg.md).
 
+## Primary PSG mirroring
+
+Explorer can also mirror the normal MSX PSG output through the cartridge DAC. This is controlled by the separate **PSG** field on the ROM screen, not by the Audio profile field.
+
+When **PSG: Yes** is selected, the Pico captures writes to the primary PSG ports `0xA0` and `0xA1`, feeds them to an AY/YM-compatible `emu2149` instance, and mixes the generated samples into the active I2S audio stream. If no other cartridge audio profile is selected, Explorer starts a PSG-only I2S audio loop. If SCC, SCC+, Dual PSG, or MSX-MUSIC is selected, the primary PSG mirror is mixed into that profile's DAC stream.
+
+This does not replace or mute the physical PSG inside the MSX. It is useful when you want ROM PSG music and effects on the same cartridge DAC output as SCC, Dual PSG, or MSX-MUSIC.
+
 ## MSX-MUSIC emulation
 
 The PicoVerse 2350 Explorer firmware can emulate the YM2413/MSX-MUSIC audio chip and expose an FM-PAC-compatible BIOS in an expanded cartridge slot when the **MSX-MUSIC** audio profile is selected. The BIOS is stored as a hidden payload in the Explorer UF2 after the WiFi configuration and ESP8266P BIOS payloads; it is read from flash at launch time and is not compiled into the Pico firmware binary.
@@ -307,4 +304,4 @@ MSX-MUSIC uses I/O ports `0x7C` for register select and `0x7D` for data writes, 
 - File Hunter service: http://file-hunter.com/
 
 Author: Cristiano Goncalves
-Last updated: 05/16/2026
+Last updated: 05/28/2026

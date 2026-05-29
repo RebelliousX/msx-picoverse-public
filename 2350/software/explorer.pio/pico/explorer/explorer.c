@@ -61,13 +61,7 @@
 #define MP3_FLAG        0x20 // Flag in the mapper byte indicating the record is an MP3 file
 #define OVERRIDE_FLAG   0x10 // Flag in the mapper byte indicating manual override
 
-// Temporarily disable the in-menu MP3 player. The MP3 stack is being
-// reworked into a dedicated MSX ROM (mp3player.rom) so the menu no
-// longer needs to coexist with Core 1 / I2S / SD streaming. While
-// that is not in place, MP3 files are skipped during SD enumeration
-// and Core 1 is never launched, leaving Explorer free to focus on
-// flash and SD ROM execution.
-#define EXPLORER_MP3_DISABLED 1
+#define EXPLORER_MP3_DISABLED 0
 
 #define FILES_PER_PAGE  19 // Maximum files per page on the menu
 #define CTRL_BASE_ADDR  0xBFF0 // Control registers base address
@@ -135,6 +129,7 @@
 
 #define CTRL_AUDIO      (CTRL_BASE_ADDR + 9) // Control: audio profile selection
 #define CTRL_WIFI_SUPPORT (CTRL_BASE_ADDR + 10) // Control: Sunrise WiFi support (0=No, 1=Yes)
+#define CTRL_PSG_EMULATION (CTRL_BASE_ADDR + 11) // Control: primary PSG emulation (0=No, 1=Yes)
 
 #define AUDIO_PROFILE_NONE       0u
 #define AUDIO_PROFILE_SCC        1u
@@ -147,6 +142,8 @@
 #define PSG_VOLUME_SHIFT 2
 #define PSG_PORT_REG    0x10u
 #define PSG_PORT_DATA   0x11u
+#define MAIN_PSG_PORT_REG  0xA0u
+#define MAIN_PSG_PORT_DATA 0xA1u
 
 #define MSX_MUSIC_SAMPLE_RATE 44100
 #define MSX_MUSIC_CLOCK       3579545
@@ -197,10 +194,6 @@
 #define MP3_CTRL_TOTAL_L   (MP3_CTRL_BASE + 6)
 #define MP3_CTRL_TOTAL_H   (MP3_CTRL_BASE + 7)
 #define MP3_CTRL_MODE      (MP3_CTRL_BASE + 8)
-
-// "Now Playing" buffer: 60-byte name (space-padded) + 4-byte size (LE)
-#define MP3_NOW_PLAYING_BASE 0xBFA0
-#define MP3_NOW_PLAYING_SIZE 64
 
 // MSX protocol command code for MP3 file selection (local to explorer.c)
 #define MP3_CMD_SELECT      0x01
@@ -576,9 +569,9 @@ static volatile uint16_t mp3_pending_index = 0;
 static volatile uint8_t mp3_pending_cmd = 0;
 static volatile uint8_t mp3_play_mode = MP3_PLAY_MODE_SINGLE;
 static uint16_t mp3_playing_filtered_index = 0xFFFF;
-static uint8_t mp3_now_playing_buf[MP3_NOW_PLAYING_SIZE];
 static volatile uint8_t ctrl_audio_selection = AUDIO_PROFILE_NONE;
 static volatile uint8_t ctrl_wifi_support = 0; // 0=disabled, 1=enabled for Sunrise Nextor launches
+static volatile uint8_t ctrl_psg_emulation = 0; // 0=disabled, 1=primary PSG over I2S
 
 static uint8_t fh_page_index = 0;
 static uint8_t fh_status = FH_STATUS_READY;
@@ -626,6 +619,11 @@ static PSG psg_instance;
 static struct audio_buffer_pool *dual_psg_audio_pool;
 static bool dual_psg_ready = false;
 static bool dual_psg_audio_started = false;
+
+static PSG main_psg_instance;
+static struct audio_buffer_pool *main_psg_audio_pool;
+static bool main_psg_ready = false;
+static bool main_psg_audio_started = false;
 
 static OPLL *msx_music_instance = NULL;
 static spin_lock_t *msx_music_lock = NULL;
@@ -1582,20 +1580,6 @@ static void process_detect_mapper_request(uint16_t filtered_index) {
     ctrl_cmd_state = 0;
 }
 
-// Populate the now-playing buffer with name + size from a record.
-static void update_mp3_now_playing(uint16_t record_index) {
-    if (record_index >= full_record_count) return;
-    const ROMRecord *rec = &records[record_index];
-    // Copy name (space-padded to ROM_NAME_MAX)
-    memcpy(mp3_now_playing_buf, rec->Name, ROM_NAME_MAX);
-    // Write size as 4-byte LE at offset 60
-    uint32_t sz = (uint32_t)rec->Size;
-    mp3_now_playing_buf[ROM_NAME_MAX + 0] = (uint8_t)(sz & 0xFFu);
-    mp3_now_playing_buf[ROM_NAME_MAX + 1] = (uint8_t)((sz >> 8) & 0xFFu);
-    mp3_now_playing_buf[ROM_NAME_MAX + 2] = (uint8_t)((sz >> 16) & 0xFFu);
-    mp3_now_playing_buf[ROM_NAME_MAX + 3] = (uint8_t)((sz >> 24) & 0xFFu);
-}
-
 // Find the next MP3 filtered index for auto-advance.
 // mode: MP3_PLAY_MODE_ALL = sequential wrap, MP3_PLAY_MODE_RANDOM = random pick.
 static uint16_t find_next_mp3_filtered_index(uint16_t current, uint8_t mode) {
@@ -1685,7 +1669,6 @@ static void core1_bg_work(void) {
                     ensure_mp3_core1_started();
                     mp3_select_file(path, (uint32_t)rec->Size);
                     mp3_playing_filtered_index = pending_index;
-                    update_mp3_now_playing(record_index);
                 } else {
                     printf("MP3: select ignored (not mp3 or no path)\n");
                 }
@@ -1699,8 +1682,10 @@ static void core1_bg_work(void) {
     if (mp3_pending_cmd != 0) {
         uint8_t cmd = mp3_pending_cmd;
         mp3_pending_cmd = 0;
-        ensure_mp3_core1_started();
-        mp3_send_cmd(cmd);
+        if (mp3_core1_started || cmd == MP3_CMD_PLAY) {
+            ensure_mp3_core1_started();
+            mp3_send_cmd(cmd);
+        }
     }
 
     // Auto-advance: when current track ends and mode is ALL or RANDOM,
@@ -1721,7 +1706,6 @@ static void core1_bg_work(void) {
                     mp3_auto_play(path, (uint32_t)records[ri].Size);
                     mp3_playing_filtered_index = next;
                     mp3_selected_index = next;
-                    update_mp3_now_playing(ri);
                 }
             }
         }
@@ -1828,6 +1812,10 @@ static inline void setup_gpio()
     gpio_init(PIN_IORQ); gpio_set_dir(PIN_IORQ, GPIO_IN); 
     gpio_init(PIN_SLTSL); gpio_set_dir(PIN_SLTSL, GPIO_IN); 
     gpio_init(PIN_BUSSDIR); gpio_set_dir(PIN_BUSSDIR, GPIO_IN); 
+
+    gpio_init(I2S_MUTE_PIN);
+    gpio_set_dir(I2S_MUTE_PIN, GPIO_OUT);
+    gpio_put(I2S_MUTE_PIN, 1);
 }
 
 // read_ulong - Read a 4-byte value from the memory area
@@ -2300,6 +2288,50 @@ static void __not_in_flash_func(dual_psg_init)(void)
     dual_psg_ready = true;
 }
 
+static void __not_in_flash_func(main_psg_init)(void)
+{
+    if (main_psg_ready)
+        return;
+
+    memset(&main_psg_instance, 0, sizeof(main_psg_instance));
+    main_psg_instance.rate = PSG_SAMPLE_RATE;
+    PSG_setVolumeMode(&main_psg_instance, 2);
+    PSG_setClock(&main_psg_instance, PSG_CLOCK);
+    PSG_setQuality(&main_psg_instance, 1);
+    PSG_reset(&main_psg_instance);
+    msx_pio_io_bus_init();
+    main_psg_ready = true;
+}
+
+static inline bool __not_in_flash_func(main_psg_handle_io_write)(uint8_t port, uint8_t data)
+{
+    if (!main_psg_ready)
+        return false;
+    if (port == MAIN_PSG_PORT_REG || port == MAIN_PSG_PORT_DATA)
+    {
+        PSG_writeIO(&main_psg_instance, port, data);
+        return true;
+    }
+    return false;
+}
+
+static inline void __not_in_flash_func(main_psg_service_io)(void)
+{
+    if (!main_psg_ready)
+        return;
+
+    uint16_t io_addr;
+    uint8_t io_data;
+    while (pio_try_get_io_write(&io_addr, &io_data))
+        main_psg_handle_io_write((uint8_t)(io_addr & 0xFFu), io_data);
+
+    while (pio_try_get_io_read(&io_addr))
+    {
+        pio_sm_put_blocking(msx_io_bus.pio_read, msx_io_bus.sm_io_read,
+                            pio_build_token(false, 0xFFu));
+    }
+}
+
 static inline void __not_in_flash_func(dual_psg_service_io)(void)
 {
     if (!dual_psg_ready)
@@ -2310,6 +2342,8 @@ static inline void __not_in_flash_func(dual_psg_service_io)(void)
     while (pio_try_get_io_write(&io_addr, &io_data))
     {
         uint8_t port = io_addr & 0xFFu;
+        if (main_psg_handle_io_write(port, io_data))
+            continue;
         if (port == PSG_PORT_REG || port == PSG_PORT_DATA)
             PSG_writeIO(&psg_instance, port, io_data);
     }
@@ -2329,6 +2363,14 @@ static inline int16_t __not_in_flash_func(dual_psg_calc_sample)(void)
     return clamp_i16((int32_t)PSG_calc(&psg_instance) << PSG_VOLUME_SHIFT);
 }
 
+static inline int16_t __not_in_flash_func(main_psg_calc_sample)(void)
+{
+    if (!main_psg_ready)
+        return 0;
+
+    return clamp_i16((int32_t)PSG_calc(&main_psg_instance) << PSG_VOLUME_SHIFT);
+}
+
 static void __no_inline_not_in_flash_func(core1_dual_psg_audio)(void)
 {
     while (true)
@@ -2343,7 +2385,7 @@ static void __no_inline_not_in_flash_func(core1_dual_psg_audio)(void)
                 for (int i = 0; i < SCC_AUDIO_BUFFER_SAMPLES; i++)
                 {
                     dual_psg_service_io();
-                    int16_t sample = dual_psg_calc_sample();
+                    int16_t sample = clamp_i16((int32_t)dual_psg_calc_sample() + main_psg_calc_sample());
                     samples[i * 2] = sample;
                     samples[i * 2 + 1] = sample;
                 }
@@ -2363,7 +2405,7 @@ static void dual_psg_audio_init(void)
 
     gpio_init(I2S_MUTE_PIN);
     gpio_set_dir(I2S_MUTE_PIN, GPIO_OUT);
-    gpio_put(I2S_MUTE_PIN, 0);
+    gpio_put(I2S_MUTE_PIN, 1);
 
     static audio_format_t dual_psg_audio_format = {
         .sample_freq = PSG_SAMPLE_RATE,
@@ -2401,6 +2443,7 @@ static void dual_psg_audio_init(void)
     audio_i2s_setup(&dual_psg_audio_format, &dual_psg_i2s_config);
     audio_i2s_connect(dual_psg_audio_pool);
     audio_i2s_set_enabled(true);
+    gpio_put(I2S_MUTE_PIN, 0);
     dual_psg_audio_started = true;
 }
 
@@ -2410,6 +2453,90 @@ static void start_dual_psg_audio(void)
     dual_psg_audio_init();
     if (dual_psg_audio_pool)
         multicore_launch_core1(core1_dual_psg_audio);
+}
+
+static void __no_inline_not_in_flash_func(core1_main_psg_audio)(void)
+{
+    while (true)
+    {
+        while (true)
+        {
+            main_psg_service_io();
+            struct audio_buffer *buffer = take_audio_buffer(main_psg_audio_pool, false);
+            if (buffer)
+            {
+                int16_t *samples = (int16_t *)buffer->buffer->bytes;
+                for (int i = 0; i < SCC_AUDIO_BUFFER_SAMPLES; i++)
+                {
+                    main_psg_service_io();
+                    int16_t sample = main_psg_calc_sample();
+                    samples[i * 2] = sample;
+                    samples[i * 2 + 1] = sample;
+                }
+                buffer->sample_count = SCC_AUDIO_BUFFER_SAMPLES;
+                give_audio_buffer(main_psg_audio_pool, buffer);
+                break;
+            }
+            tight_loop_contents();
+        }
+    }
+}
+
+static void main_psg_audio_init(void)
+{
+    if (main_psg_audio_started)
+        return;
+
+    gpio_init(I2S_MUTE_PIN);
+    gpio_set_dir(I2S_MUTE_PIN, GPIO_OUT);
+    gpio_put(I2S_MUTE_PIN, 1);
+
+    static audio_format_t main_psg_audio_format = {
+        .sample_freq = PSG_SAMPLE_RATE,
+        .format = AUDIO_BUFFER_FORMAT_PCM_S16,
+        .channel_count = 2,
+    };
+
+    static struct audio_buffer_format main_psg_producer_format = {
+        .format = &main_psg_audio_format,
+        .sample_stride = 4,
+    };
+
+    main_psg_audio_pool = audio_new_producer_pool(&main_psg_producer_format, 3, SCC_AUDIO_BUFFER_SAMPLES);
+
+    int dma_channel = -1;
+    for (int ch = 0; ch < NUM_DMA_CHANNELS; ch++) {
+        if (!dma_channel_is_claimed(ch)) {
+            dma_channel = ch;
+            break;
+        }
+    }
+    if (dma_channel < 0) {
+        main_psg_audio_pool = NULL;
+        return;
+    }
+
+    static struct audio_i2s_config main_psg_i2s_config = {
+        .data_pin = I2S_DATA_PIN,
+        .clock_pin_base = I2S_BCLK_PIN,
+        .dma_channel = 0,
+        .pio_sm = 2,
+    };
+    main_psg_i2s_config.dma_channel = (uint)dma_channel;
+
+    audio_i2s_setup(&main_psg_audio_format, &main_psg_i2s_config);
+    audio_i2s_connect(main_psg_audio_pool);
+    audio_i2s_set_enabled(true);
+    gpio_put(I2S_MUTE_PIN, 0);
+    main_psg_audio_started = true;
+}
+
+static void start_main_psg_audio(void)
+{
+    main_psg_init();
+    main_psg_audio_init();
+    if (main_psg_audio_pool)
+        multicore_launch_core1(core1_main_psg_audio);
 }
 
 static void __not_in_flash_func(msx_music_init)(void)
@@ -2462,6 +2589,8 @@ static inline void __not_in_flash_func(msx_music_service_io)(void)
     while (pio_try_get_io_write(&io_addr, &io_data))
     {
         uint8_t port = io_addr & 0xFFu;
+        if (main_psg_handle_io_write(port, io_data))
+            continue;
         if (port == MSX_MUSIC_PORT_REG || port == MSX_MUSIC_PORT_DATA)
             msx_music_write_io(port, io_data);
     }
@@ -2487,7 +2616,7 @@ static void __no_inline_not_in_flash_func(core1_msx_music_audio)(void)
                 for (int i = 0; i < SCC_AUDIO_BUFFER_SAMPLES; i++)
                 {
                     msx_music_service_io();
-                    int16_t sample = msx_music_calc_sample();
+                    int16_t sample = clamp_i16((int32_t)msx_music_calc_sample() + main_psg_calc_sample());
                     samples[i * 2] = sample;
                     samples[i * 2 + 1] = sample;
                 }
@@ -2507,7 +2636,7 @@ static void msx_music_audio_init(void)
 
     gpio_init(I2S_MUTE_PIN);
     gpio_set_dir(I2S_MUTE_PIN, GPIO_OUT);
-    gpio_put(I2S_MUTE_PIN, 0);
+    gpio_put(I2S_MUTE_PIN, 1);
 
     static audio_format_t msx_music_audio_format = {
         .sample_freq = MSX_MUSIC_SAMPLE_RATE,
@@ -2545,6 +2674,7 @@ static void msx_music_audio_init(void)
     audio_i2s_setup(&msx_music_audio_format, &msx_music_i2s_config);
     audio_i2s_connect(msx_music_audio_pool);
     audio_i2s_set_enabled(true);
+    gpio_put(I2S_MUTE_PIN, 0);
     msx_music_audio_started = true;
 }
 
@@ -2966,7 +3096,9 @@ static inline void __not_in_flash_func(handle_menu_write_explorer)(uint16_t addr
                  mp3_pending_index = mp3_selected_index;
                  mp3_pending_select = true;
              }
-        } else if (data == MP3_CMD_PLAY || data == MP3_CMD_STOP || data == MP3_CMD_TOGGLE_MUTE) {
+           } else if (data == MP3_CMD_PLAY || data == MP3_CMD_STOP ||
+                    data == MP3_CMD_PAUSE || data == MP3_CMD_RESUME ||
+                    data == MP3_CMD_TOGGLE_MUTE) {
              mp3_pending_cmd = data;
         }
         return;
@@ -2986,6 +3118,11 @@ static inline void __not_in_flash_func(handle_menu_write_explorer)(uint16_t addr
 
     if (addr == CTRL_WIFI_SUPPORT) {
         ctrl_wifi_support = data ? 1u : 0u;
+        return;
+    }
+
+    if (addr == CTRL_PSG_EMULATION) {
+        ctrl_psg_emulation = data ? 1u : 0u;
         return;
     }
 
@@ -3954,7 +4091,7 @@ static uint32_t fh_parse_download_size(const char *line, uint16_t fallback_size_
 
 static bool fh_prepare_download_region(uint32_t size)
 {
-    if (size == 0u || size > PSRAM_TOTAL_SIZE) return false;
+    if (size == 0u || size > SD_ROM_MAX_SIZE) return false;
     if (!psram_bring_up_once()) return false;
 
     if (size <= sd_rom_region.size)
@@ -4188,6 +4325,12 @@ static bool fh_download_selected(void)
     bool ok;
 
     if (fh_selected_index >= fh_catalog_count) return false;
+
+    if (((uint32_t)fh_catalog[fh_selected_index].size_kb * 1024u) > SD_ROM_MAX_SIZE)
+    {
+        fh_copy_status_prefix("Download blocked: >4MB");
+        return false;
+    }
 
     fh_build_http_path(path, sizeof(path), fh_active_query, (int)fh_selected_index);
 
@@ -4609,6 +4752,7 @@ int __no_inline_not_in_flash_func(loadrom_msx_menu)(uint32_t offset)
                         case CTRL_ACK:     data = (uint8_t)((fh_progress_percent >> 8) & 0xFFu); break;
                         case CTRL_AUDIO:   data = fh_result; break;
                         case CTRL_WIFI_SUPPORT: data = 0; break;
+                        case CTRL_PSG_EMULATION: data = 0; break;
                     }
                 }
                 else switch (addr)
@@ -4624,11 +4768,8 @@ int __no_inline_not_in_flash_func(loadrom_msx_menu)(uint32_t offset)
                     case CTRL_ACK:     data = ctrl_ack_value; break;
                     case CTRL_AUDIO:   data = ctrl_audio_selection; break;
                     case CTRL_WIFI_SUPPORT: data = ctrl_wifi_support; break;
+                    case CTRL_PSG_EMULATION: data = ctrl_psg_emulation; break;
                 }
-            }
-            else if (addr >= MP3_NOW_PLAYING_BASE && addr < (MP3_NOW_PLAYING_BASE + MP3_NOW_PLAYING_SIZE))
-            {
-                data = mp3_now_playing_buf[addr - MP3_NOW_PLAYING_BASE];
             }
             else if (addr >= MP3_CTRL_BASE && addr <= (MP3_CTRL_BASE + 0x0F))
             {
@@ -5032,15 +5173,23 @@ static void __no_inline_not_in_flash_func(core1_scc_audio)(void)
 {
     while (true)
     {
-        struct audio_buffer *buffer = take_audio_buffer(scc_audio_pool, true);
+        struct audio_buffer *buffer = NULL;
+        while (!buffer)
+        {
+            main_psg_service_io();
+            buffer = take_audio_buffer(scc_audio_pool, false);
+            if (!buffer)
+                tight_loop_contents();
+        }
         int16_t *samples = (int16_t *)buffer->buffer->bytes;
         for (int i = 0; i < SCC_AUDIO_BUFFER_SAMPLES; i++)
         {
+            main_psg_service_io();
             int16_t raw = SCC_calc(&scc_instance);
             int32_t boosted = (int32_t)raw << SCC_VOLUME_SHIFT;
             if (boosted > 32767) boosted = 32767;
             else if (boosted < -32768) boosted = -32768;
-            int16_t s = (int16_t)boosted;
+            int16_t s = clamp_i16(boosted + main_psg_calc_sample());
             samples[i * 2]     = s;  // left
             samples[i * 2 + 1] = s;  // right
         }
@@ -5056,7 +5205,7 @@ static void i2s_audio_init_scc(void)
 {
     gpio_init(I2S_MUTE_PIN);
     gpio_set_dir(I2S_MUTE_PIN, GPIO_OUT);
-    gpio_put(I2S_MUTE_PIN, 0);
+    gpio_put(I2S_MUTE_PIN, 1);
 
     static audio_format_t scc_audio_format = {
         .sample_freq = SCC_SAMPLE_RATE,
@@ -5097,6 +5246,7 @@ static void i2s_audio_init_scc(void)
     audio_i2s_setup(&scc_audio_format, &scc_i2s_config);
     audio_i2s_connect(scc_audio_pool);
     audio_i2s_set_enabled(true);
+    gpio_put(I2S_MUTE_PIN, 0);
 }
 
 // -----------------------------------------------------------------------
@@ -7017,10 +7167,16 @@ int __no_inline_not_in_flash_func(main)()
     uint8_t mapper = mapper_code_from_record_byte(selected->Mapper);
     audio_mode_t audio_mode = resolve_audio_mode(mapper, ctrl_audio_selection);
     bool scc_audio = (audio_mode == AUDIO_MODE_SCC || audio_mode == AUDIO_MODE_SCC_PLUS);
+    bool psg_emulation = (ctrl_psg_emulation != 0u) && !is_system_mapper(mapper);
+    if (psg_emulation) {
+        main_psg_init();
+    }
     if (audio_mode == AUDIO_MODE_DUAL_PSG) {
         start_dual_psg_audio();
     } else if (audio_mode == AUDIO_MODE_MSX_MUSIC) {
         start_msx_music_audio();
+    } else if (psg_emulation && !scc_audio) {
+        start_main_psg_audio();
     }
     bool wifi_support = (ctrl_wifi_support != 0u) && is_system_mapper(mapper);
 

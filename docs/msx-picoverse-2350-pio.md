@@ -4,8 +4,9 @@ This document describes the RP2350 PIO strategy currently used in:
 
 - `2350/software/loadrom.pio`
 - `2350/software/multirom.pio`
+- `2350/software/explorer.pio`
 
-Both targets share the same PIO bus engine, I/O bus engine, and audio architecture. The MultiROM firmware extends LoadROM by embedding multiple ROMs with a menu, while both support the full mapper set (types 1–16) including Sunrise IDE, SCC/SCC+, Manbow2, and ASCII16-X.
+The 2350 targets share the same PIO bus engine, I/O bus engine, and audio architecture. MultiROM extends LoadROM by embedding multiple ROMs with a menu, while Explorer adds microSD browsing, MP3 playback, File Hunter, and per-ROM audio selection. The mapper set covers types 1-16 including Sunrise IDE, SCC/SCC+, Manbow2, and ASCII16-X.
 
 ---
 
@@ -15,14 +16,14 @@ Both targets share the same PIO bus engine, I/O bus engine, and audio architectu
 |---|---|
 | **PIO bus engine (`pio0`)** | Detect `/SLTSL` + `/RD`/`/WR`, assert `/WAIT`, capture writes, drive/release D0..D7 |
 | **PIO I/O bus engine (`pio1`, mapper mode)** | Capture `/IORQ` + `/RD`/`/WR` for mapper page register access (ports FC–FF) |
-| **PIO I2S audio (`pio1`, SCC mode)** | Generate I2S bitstream for SCC/SCC+ audio output via DAC |
-| **CPU (core 0)** | Mapper translation, ROM lookup, SCC/SCC+ register forwarding, Sunrise IDE register handling |
-| **CPU (core 1, SCC mode)** | Audio generation for SCC/SCC+ via emu2212 and I2S output |
+| **PIO I2S audio (`pio1`, audio mode)** | Generate I2S bitstream for SCC/SCC+, Dual PSG, MSX-MUSIC, MP3, and Explorer primary PSG mirror output via DAC |
+| **CPU (core 0)** | Mapper translation, ROM lookup, SCC/SCC+ register forwarding, Sunrise IDE register handling, Explorer menu/File Hunter control |
+| **CPU (core 1, audio mode)** | Audio generation for SCC/SCC+ via emu2212, PSG via emu2149, MSX-MUSIC via emu2413, MP3 decoding, and I2S output |
 | **CPU (core 1, Sunrise mode)** | TinyUSB host stack — USB mass storage read/write for Sunrise IDE emulation |
 
-The bus strategy is still PIO + FIFO tokenization, but RP2350 adds an audio subsystem path (SCC/SCC+), a Sunrise IDE path with USB host, and platform-specific GPIO/clock settings.
+The bus strategy is still PIO + FIFO tokenization, but RP2350 adds audio subsystem paths (SCC/SCC+, Dual PSG, MSX-MUSIC, MP3, and Explorer primary PSG mirroring), a Sunrise IDE path with USB host, and platform-specific GPIO/clock settings.
 
-> **Note:** PIO1 is shared between I2S audio (SCC mode) and I/O bus (mapper mode). These are mutually exclusive at runtime.
+> **Note:** PIO1 is shared by the I/O bus captors and the I2S audio path. Explorer and the audio-enabled ROM modes keep the MSX memory bus on PIO0 and place I2S on PIO1 SM2 so I/O write capture and DAC streaming can coexist.
 
 ---
 
@@ -97,7 +98,7 @@ The implementation uses `jmp pin` polling to re-check slot/IORQ validity while w
 ### ROM serving
 
 - Uses a 256 KB SRAM cache with flash fallback for ROMs exceeding cache capacity.
-- microSD-resident ROMs (Explorer firmware) up to 2 MB are streamed into the cartridge's external 8 MB PSRAM (QMI CS1, 52.5 MHz QPI). The leading window is mirrored into the same 256 KB SRAM cache used by flash ROMs, so the mapper hot-loop accesses go through fast SRAM regardless of source.
+- microSD-resident ROMs (Explorer firmware) up to 4 MB are streamed into the cartridge's external 8 MB PSRAM (QMI CS1, 52.5 MHz QPI). The leading window is mirrored into the same 256 KB SRAM cache used by flash ROMs, so the mapper hot-loop accesses go through fast SRAM regardless of source.
 - GPIO input hysteresis is enabled on address (A0–A15) and data (D0–D7) pins to filter bus glitches.
 - Mapper support includes Plain16/32, Planar48, Planar64, Konami SCC, Konami, ASCII8, ASCII16, ASCII16-X, NEO8, NEO16, Manbow2, Sunrise IDE, and Sunrise IDE + 1MB PSRAM Mapper.
 
@@ -137,18 +138,30 @@ In mapper mode (`-m`), additionally:
 - An expanded sub-slot architecture provides sub-slot 0 (Nextor ROM) and sub-slot 1 (mapper RAM).
 - A bootstrap ROM phase ensures clean cold-boot before the expanded-slot mapper is activated.
 
-### SCC / SCC+ integration
+### Audio integration
 
-When `-scc` or `-sccplus` flags are encoded in the ROM type byte (supported for Konami SCC and Manbow2 mapper types):
+When an audio mode is selected, core 0 keeps serving the MSX memory bus while core 1 runs the active audio producer and I2S output.
+
+For `-scc` or `-sccplus` flags encoded in the ROM type byte, or the matching Explorer audio profiles:
 
 - Core 0 continues bus/memory service and forwards SCC writes.
 - Core 1 continuously generates PCM audio from emu2212.
 - Audio is sent using `pico_audio_i2s`.
 - Build sets `PICO_AUDIO_I2S_PIO=1` so audio runs on **PIO1**, keeping **PIO0** dedicated to MSX bus handling.
 
-For full SCC/SCC+ behavior and registers, see:
+Explorer can also route these audio sources through the same DAC path:
+
+- **Dual PSG**: captures secondary PSG writes on ports `0x10`/`0x11` with PIO1 I/O write capture and generates audio with emu2149.
+- **Primary PSG mirror**: when the ROM detail **PSG** option is set to Yes, captures primary PSG writes on ports `0xA0`/`0xA1` and mixes a DAC-side copy into the active audio profile, or starts a PSG-only audio loop when no other profile is selected.
+- **MSX-MUSIC**: captures YM2413 writes on ports `0x7C`/`0x7D` and generates audio with emu2413.
+- **MP3 playback**: decodes MP3 files from microSD on core 1 and streams PCM to I2S while the Explorer MSX menu remains on core 0.
+
+For full audio behavior and registers, see:
 
 - `docs/msx-picoverse-2350-scc.md`
+- `docs/msx-picoverse-2350-dualpsg.md`
+- `docs/msx-picoverse-2350-fmpac.md`
+- `docs/msx-picoverse-2350-explorer-tool-manual.en-us.md`
 
 ---
 

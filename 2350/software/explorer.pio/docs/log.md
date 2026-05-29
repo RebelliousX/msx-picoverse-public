@@ -1,5 +1,22 @@
 # Change Log
 
+## v2.28
+
+- Bumped Explorer to v2.28.
+- Re-enabled microSD MP3 discovery in Explorer, added MP3 list/detail UI with Play, Stop, Pause, Resume, and play counter controls, and wired the menu to the Pico MP3 decoder service.
+- Prevented idle MP3 Stop/Pause/Resume commands from lazy-starting Core 1 during Explorer startup or normal flash browsing.
+- Moved Explorer I2S audio to PIO1 SM2 and removed MP3 teardown of PIO0 so MP3 selection cannot disrupt the live MSX bus PIO programs.
+- Removed the unused MP3 now-playing memory window that overlapped the Explorer ROM/query exchange area and could corrupt the MP3 detail screen.
+- Rendered MP3 action rows from fixed literals instead of a RAM pointer table to avoid corrupted action labels on the MSX detail screen.
+- Refreshed the MP3 play counter from the MSX JIFFY timer, cleared the menu shortcut line on the MP3 detail page, and stopped playback when leaving MP3 details with ESC.
+- Removed the unavailable MP3 total-duration field from the detail screen and expanded the MP3 name display to use the full 80-column line.
+- Restored the MP3 elapsed play time and playback status to the detail page content area while keeping the normal menu shortcut hints hidden.
+- Blocked File Hunter downloads above the 4 MB microSD/PSRAM launch limit used for SD-loaded ROMs.
+- Kept the I2S DAC mute line asserted while Explorer is idle, only unmuting it after MP3 playback or a ROM audio profile starts.
+- Simplified MP3 detail actions into Play/Stop and Pause/Resume toggle rows that follow the current playback state.
+- Added a ROM detail PSG option that mirrors primary PSG writes to the Pico DAC and mixes with existing ROM audio profiles.
+- Updated Explorer, public, feature, Dual PSG, and PIO documentation for the MP3 player and primary PSG DAC mirroring behavior.
+
 ## v2.27
 
 - Bumped Explorer to v2.27.

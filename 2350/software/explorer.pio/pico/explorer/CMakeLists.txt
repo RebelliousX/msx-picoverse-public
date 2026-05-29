@@ -78,6 +78,7 @@ target_link_libraries(explorer
         )
 
 target_compile_definitions(explorer PRIVATE
+    PICO_AUDIO_I2S_PIO=1
 )
 
 # Add the standard include files to the build
