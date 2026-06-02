@@ -382,7 +382,7 @@ static void core1_entry(void)
 // -----------------------------------------------------------------------
 int main(void)
 {
-    set_sys_clock_khz(250000, true);
+    set_sys_clock_khz(230000, true);
 
     // Initialise joystick state
     joystick_state[0] = 0xFF;

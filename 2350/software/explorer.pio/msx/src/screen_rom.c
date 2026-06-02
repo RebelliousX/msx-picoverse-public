@@ -50,13 +50,18 @@ static unsigned char record_is_wifi_capable_system_rom(const ROMRecord *record) 
     return mapper_code == 10 || mapper_code == 11 || mapper_code == 15 || mapper_code == 16;
 }
 
+static unsigned char record_is_sunrise_system_rom(const ROMRecord *record) {
+    unsigned char mapper_code = record_mapper_code(record->Mapper);
+    return mapper_code == 10 || mapper_code == 11 || mapper_code == 15 || mapper_code == 16;
+}
+
 static unsigned char record_supports_scc_audio(const ROMRecord *record) {
     unsigned char mapper_code = record_mapper_code(record->Mapper);
     return mapper_code == 3 || mapper_code == 14;
 }
 
 static unsigned char record_supports_dual_psg(const ROMRecord *record) {
-    return !record_is_folder(record) && !record_is_system_rom(record) && !record_supports_scc_audio(record);
+    return !record_is_folder(record) && (!record_is_system_rom(record) || record_is_sunrise_system_rom(record)) && !record_supports_scc_audio(record);
 }
 
 static unsigned char record_supports_msx_music(const ROMRecord *record) {

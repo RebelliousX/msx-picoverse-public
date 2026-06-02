@@ -1922,7 +1922,7 @@ void __no_inline_not_in_flash_func(loadrom_manbow2)(uint32_t offset, bool cache_
 // Main function running on core 0
 int main(void)
 {
-    set_sys_clock_khz(250000, true);     // Set system clock to 250MHz
+    set_sys_clock_khz(230000, true);     // Set system clock to 230MHz
     stdio_init_all();   // Initialize stdio
     setup_gpio();       // Initialize GPIO
 

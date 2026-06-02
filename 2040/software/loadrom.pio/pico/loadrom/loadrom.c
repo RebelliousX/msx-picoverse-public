@@ -1892,8 +1892,8 @@ void __no_inline_not_in_flash_func(loadrom_sunrise_mapper)(uint32_t offset, bool
 // -----------------------------------------------------------------------
 int __no_inline_not_in_flash_func(main)()
 {
-    // Set system clock to 250MHz for maximum headroom
-    set_sys_clock_khz(250000, true);
+    // Set system clock to 230MHz for ROM loading timing headroom
+    set_sys_clock_khz(230000, true);
 
     // Initialize GPIO
     setup_gpio();

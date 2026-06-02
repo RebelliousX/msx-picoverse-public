@@ -1064,7 +1064,7 @@ static void core1_entry(void) {
 // Main — Core 0
 // -----------------------------------------------------------------------
 int main(void) {
-    set_sys_clock_khz(250000, true);
+    set_sys_clock_khz(230000, true);
 
     // Initialize state
     tx_ring_lock = spin_lock_instance(spin_lock_claim_unused(true));

@@ -1,5 +1,12 @@
 # Change Log
 
+## v2.30
+
+- Bumped Explorer to v2.30.
+- Enabled the primary PSG DAC mirror for Sunrise SYSTEM ROM launches through a reusable SYSTEM audio service, including Sunrise + Mapper modes without stealing mapper I/O or blocking mapper bootstrap.
+- Enabled the Dual PSG audio profile for Sunrise SYSTEM ROMs through the SYSTEM audio service.
+- Split Dual PSG and primary PSG mirror output into separate stereo channels when both are enabled.
+
 ## v2.29
 
 - Bumped Explorer to v2.29.
