@@ -83,7 +83,7 @@ Initialization performs these steps:
 7. Initialize the PIO1 I/O bus captors.
 8. Start I2S audio output when the selected audio mode requires Dual PSG.
 
-Each audio sample is produced with `PSG_calc()`, shifted left by `PSG_VOLUME_SHIFT`, clamped to signed 16-bit range, and written to both left and right I2S channels.
+Each audio sample is produced with `PSG_calc()`, shifted left by `PSG_VOLUME_SHIFT`, and clamped to signed 16-bit range before routing to I2S.
 
 ## Audio output path
 
@@ -103,7 +103,9 @@ The firmware uses:
   - Word select: GPIO 31.
   - Mute control: GPIO 32.
 
-The same mono PSG sample is written to both stereo channels.
+By default, a standalone Dual PSG stream is duplicated to both stereo channels.
+
+When Explorer runs with both **Audio: Dual PSG** and **PSG: Yes**, the firmware applies a stereo split: Dual PSG output is sent to the left channel and the primary PSG mirror is sent to the right channel.
 
 ## PIO bus capture
 

@@ -1,5 +1,16 @@
 # Change Log
 
+## v2.31
+
+- Bumped Explorer to v2.31.
+- Mixed primary PSG mirroring into MSX-MUSIC with lower gain and DC filtering so MSX-MUSIC ROMs can enable PSG emulation without FM distortion.
+- Gated the MSX-MUSIC PSG mix on audible PSG channel state so silent PSG emulation no longer changes the MSX-MUSIC output.
+- Mixed active PSG with MSX-MUSIC using reserved headroom so combined PSG/FM playback avoids clipping artifacts.
+- Allowed the MSX-MUSIC audio profile to be selected and launched with every non-SYSTEM mapper.
+- Enabled MSX-MUSIC selection and SYSTEM audio servicing for Sunrise Nextor SYSTEM ROMs.
+- Kept Sunrise Nextor SYSTEM ROMs on the Sunrise loader when MSX-MUSIC is selected instead of routing them through the FM-PAC ROM launcher.
+- Added KonamiSCC mapper handling to the MSX-MUSIC/FM-PAC launcher so SCC mapper ROMs still boot when MSX-MUSIC is selected.
+
 ## v2.30
 
 - Bumped Explorer to v2.30.

@@ -156,6 +156,10 @@
 #define MSX_MUSIC_SAMPLE_RATE 44100
 #define MSX_MUSIC_CLOCK       3579545
 #define MSX_MUSIC_VOLUME_SHIFT 2
+#define MSX_MUSIC_PSG_VOLUME_SHIFT 0
+#define MSX_MUSIC_MIX_MUSIC_WEIGHT 3
+#define MSX_MUSIC_MIX_PSG_WEIGHT   1
+#define MSX_MUSIC_MIX_WEIGHT_SHIFT 2
 #define MSX_MUSIC_PORT_REG    0x7Cu
 #define MSX_MUSIC_PORT_DATA   0x7Du
 #define FMPAC_BIOS_SIZE       FMPAC_BIOS_ROM_SIZE
@@ -668,6 +672,7 @@ typedef enum {
     SYSTEM_AUDIO_PROFILE_NONE = 0,
     SYSTEM_AUDIO_PROFILE_MAIN_PSG,
     SYSTEM_AUDIO_PROFILE_DUAL_PSG,
+    SYSTEM_AUDIO_PROFILE_MSX_MUSIC,
 } system_audio_profile_t;
 
 static system_audio_profile_t system_audio_profile = SYSTEM_AUDIO_PROFILE_NONE;
@@ -677,6 +682,16 @@ static spin_lock_t *msx_music_lock = NULL;
 static struct audio_buffer_pool *msx_music_audio_pool;
 static bool msx_music_ready = false;
 static bool msx_music_audio_started = false;
+static bool msx_music_core1_services_io = true;
+static int32_t msx_music_psg_dc_prev_input = 0;
+static int32_t msx_music_psg_dc_prev_output = 0;
+
+static void msx_music_init(void);
+static void msx_music_audio_init(void);
+static inline void __not_in_flash_func(msx_music_write_io)(uint8_t port, uint8_t data);
+static inline void __not_in_flash_func(msx_music_service_io)(void);
+static inline int16_t __not_in_flash_func(msx_music_mix_sample)(int16_t music);
+static inline void __not_in_flash_func(msx_music_audio_service_buffer)(void);
 
 static struct audio_buffer_pool *claim_rom_audio_handoff_pool(void)
 {
@@ -729,10 +744,17 @@ static bool mapper_supports_scc_audio(uint8_t mapper) {
 
 static audio_mode_t resolve_audio_mode(uint8_t mapper, uint8_t requested_profile) {
     if (is_system_mapper(mapper)) {
-        return requested_profile == AUDIO_PROFILE_DUAL_PSG ? AUDIO_MODE_DUAL_PSG : AUDIO_MODE_NONE;
+        if (requested_profile == AUDIO_PROFILE_DUAL_PSG)
+            return AUDIO_MODE_DUAL_PSG;
+        if (requested_profile == AUDIO_PROFILE_MSX_MUSIC)
+            return AUDIO_MODE_MSX_MUSIC;
+        return AUDIO_MODE_NONE;
     }
     if (is_audio_system_mapper(mapper)) {
         return AUDIO_MODE_NONE;
+    }
+    if (requested_profile == AUDIO_PROFILE_MSX_MUSIC) {
+        return AUDIO_MODE_MSX_MUSIC;
     }
     if (mapper_supports_scc_audio(mapper)) {
         if (requested_profile == AUDIO_PROFILE_SCC_PLUS) {
@@ -745,9 +767,6 @@ static audio_mode_t resolve_audio_mode(uint8_t mapper, uint8_t requested_profile
     }
     if (requested_profile == AUDIO_PROFILE_DUAL_PSG) {
         return AUDIO_MODE_DUAL_PSG;
-    }
-    if (requested_profile == AUDIO_PROFILE_MSX_MUSIC) {
-        return AUDIO_MODE_MSX_MUSIC;
     }
     return AUDIO_MODE_NONE;
 }
@@ -2653,15 +2672,57 @@ static inline int16_t __not_in_flash_func(dual_psg_calc_sample)(void)
     return sample;
 }
 
-static inline int16_t __not_in_flash_func(main_psg_calc_sample)(void)
+static inline int16_t __not_in_flash_func(main_psg_calc_sample_shifted)(uint8_t volume_shift)
 {
     if (!main_psg_ready)
         return 0;
 
     uint32_t save = spin_lock_blocking(main_psg_lock);
-    int16_t sample = clamp_i16((int32_t)PSG_calc(&main_psg_instance) << PSG_VOLUME_SHIFT);
+    int16_t sample = clamp_i16((int32_t)PSG_calc(&main_psg_instance) << volume_shift);
     spin_unlock(main_psg_lock, save);
     return sample;
+}
+
+static inline int16_t __not_in_flash_func(main_psg_calc_sample)(void)
+{
+    return main_psg_calc_sample_shifted(PSG_VOLUME_SHIFT);
+}
+
+static inline bool __not_in_flash_func(main_psg_has_audible_channels_unlocked)(void)
+{
+    uint8_t mixer = main_psg_instance.reg[7];
+    for (uint8_t channel = 0; channel < 3; channel++)
+    {
+        uint8_t volume = main_psg_instance.reg[8 + channel] & 0x1Fu;
+        if ((volume & 0x10u) != 0u)
+        {
+            if (main_psg_instance.env_freq == 0u)
+                continue;
+        }
+        else if ((volume & 0x0Fu) == 0u)
+        {
+            continue;
+        }
+
+        bool tone_enabled = (mixer & (1u << channel)) == 0u;
+        bool noise_enabled = (mixer & (1u << (channel + 3u))) == 0u;
+        if (tone_enabled || noise_enabled)
+            return true;
+    }
+    return false;
+}
+
+static inline bool __not_in_flash_func(main_psg_calc_audible_sample_shifted)(uint8_t volume_shift, int16_t *sample)
+{
+    if (!main_psg_ready)
+        return false;
+
+    uint32_t save = spin_lock_blocking(main_psg_lock);
+    bool audible = main_psg_has_audible_channels_unlocked();
+    if (audible)
+        *sample = clamp_i16((int32_t)PSG_calc(&main_psg_instance) << volume_shift);
+    spin_unlock(main_psg_lock, save);
+    return audible;
 }
 
 static inline void __not_in_flash_func(dual_psg_write_stereo_sample)(int16_t *samples, int index)
@@ -2922,6 +2983,8 @@ static void start_main_psg_audio(bool service_io_on_core1)
 
 static system_audio_profile_t system_audio_resolve_profile(void)
 {
+    if (ctrl_audio_selection == AUDIO_PROFILE_MSX_MUSIC)
+        return SYSTEM_AUDIO_PROFILE_MSX_MUSIC;
     if (ctrl_audio_selection == AUDIO_PROFILE_DUAL_PSG)
         return SYSTEM_AUDIO_PROFILE_DUAL_PSG;
     if (ctrl_psg_emulation != 0u)
@@ -2934,6 +2997,16 @@ static void system_audio_init_for_sunrise(bool service_io_on_core1)
     system_audio_profile = system_audio_resolve_profile();
     switch (system_audio_profile)
     {
+    case SYSTEM_AUDIO_PROFILE_MSX_MUSIC:
+        msx_music_init();
+        msx_music_core1_services_io = service_io_on_core1;
+        if (ctrl_psg_emulation != 0u)
+        {
+            main_psg_init();
+            main_psg_core1_services_io = service_io_on_core1;
+        }
+        msx_music_audio_init();
+        break;
     case SYSTEM_AUDIO_PROFILE_DUAL_PSG:
         dual_psg_audio_init_for_system(service_io_on_core1);
         break;
@@ -2949,6 +3022,15 @@ static inline bool __not_in_flash_func(system_audio_handle_io_write)(uint8_t por
 {
     switch (system_audio_profile)
     {
+    case SYSTEM_AUDIO_PROFILE_MSX_MUSIC:
+        if (main_psg_handle_io_write(port, data))
+            return true;
+        if (port == MSX_MUSIC_PORT_REG || port == MSX_MUSIC_PORT_DATA)
+        {
+            msx_music_write_io(port, data);
+            return true;
+        }
+        return false;
     case SYSTEM_AUDIO_PROFILE_DUAL_PSG:
         if (main_psg_handle_io_write(port, data))
             return true;
@@ -2964,6 +3046,9 @@ static inline void __not_in_flash_func(system_audio_service_core1)(void)
 {
     switch (system_audio_profile)
     {
+    case SYSTEM_AUDIO_PROFILE_MSX_MUSIC:
+        msx_music_audio_service_buffer();
+        break;
     case SYSTEM_AUDIO_PROFILE_DUAL_PSG:
         dual_psg_service_io();
         dual_psg_audio_service_buffer();
@@ -3031,7 +3116,7 @@ static inline void __not_in_flash_func(msx_music_write_io)(uint8_t port, uint8_t
 
 static inline void __not_in_flash_func(msx_music_service_io)(void)
 {
-    if (!msx_music_ready)
+    if (!msx_music_ready || !msx_music_core1_services_io)
         return;
 
     uint16_t io_addr;
@@ -3052,6 +3137,36 @@ static inline void __not_in_flash_func(msx_music_service_io)(void)
     }
 }
 
+static inline bool __not_in_flash_func(msx_music_calc_psg_mix_sample)(int16_t *sample)
+{
+    int16_t psg_sample = 0;
+    if (!main_psg_calc_audible_sample_shifted(MSX_MUSIC_PSG_VOLUME_SHIFT, &psg_sample))
+    {
+        msx_music_psg_dc_prev_input = 0;
+        msx_music_psg_dc_prev_output = 0;
+        *sample = 0;
+        return false;
+    }
+
+    int32_t input = psg_sample;
+    int32_t output = input - msx_music_psg_dc_prev_input + ((msx_music_psg_dc_prev_output * 511) >> 9);
+    msx_music_psg_dc_prev_input = input;
+    msx_music_psg_dc_prev_output = output;
+    *sample = clamp_i16(output);
+    return true;
+}
+
+static inline int16_t __not_in_flash_func(msx_music_mix_sample)(int16_t music)
+{
+    int16_t psg = 0;
+    if (!msx_music_calc_psg_mix_sample(&psg))
+        return music;
+
+    int32_t mixed = ((int32_t)music * MSX_MUSIC_MIX_MUSIC_WEIGHT) +
+                    ((int32_t)psg * MSX_MUSIC_MIX_PSG_WEIGHT);
+    return clamp_i16(mixed >> MSX_MUSIC_MIX_WEIGHT_SHIFT);
+}
+
 static void __no_inline_not_in_flash_func(core1_msx_music_audio)(void)
 {
     while (true)
@@ -3066,7 +3181,7 @@ static void __no_inline_not_in_flash_func(core1_msx_music_audio)(void)
                 for (int i = 0; i < SCC_AUDIO_BUFFER_SAMPLES; i++)
                 {
                     msx_music_service_io();
-                    int16_t sample = clamp_i16((int32_t)msx_music_calc_sample() + main_psg_calc_sample());
+                    int16_t sample = msx_music_mix_sample(msx_music_calc_sample());
                     samples[i * 2] = sample;
                     samples[i * 2 + 1] = sample;
                 }
@@ -3150,12 +3265,34 @@ static void start_msx_music_audio(void)
 static void start_msx_music_audio_output(void)
 {
     debug_trace("DBG start_music_output init");
+    msx_music_core1_services_io = true;
     msx_music_audio_init();
     debug_trace("DBG start_music_output pool=%p", (void *)msx_music_audio_pool);
     if (msx_music_audio_pool) {
         debug_trace("DBG start_music_output launch core1");
         multicore_launch_core1(core1_msx_music_audio);
     }
+}
+
+static inline void __not_in_flash_func(msx_music_audio_service_buffer)(void)
+{
+    if (!msx_music_audio_started || !msx_music_audio_pool)
+        return;
+
+    struct audio_buffer *buffer = take_audio_buffer(msx_music_audio_pool, false);
+    if (!buffer)
+        return;
+
+    int16_t *samples = (int16_t *)buffer->buffer->bytes;
+    for (int i = 0; i < SCC_AUDIO_BUFFER_SAMPLES; i++)
+    {
+        msx_music_service_io();
+        int16_t sample = msx_music_mix_sample(msx_music_calc_sample());
+        samples[i * 2] = sample;
+        samples[i * 2 + 1] = sample;
+    }
+    buffer->sample_count = SCC_AUDIO_BUFFER_SAMPLES;
+    give_audio_buffer(msx_music_audio_pool, buffer);
 }
 
 static inline uint8_t __not_in_flash_func(mapper_page_from_reg)(uint8_t reg)
@@ -7514,6 +7651,7 @@ void __no_inline_not_in_flash_func(loadrom_fmpac)(uint32_t offset, bool cache_en
             {
                 switch (mapper)
                 {
+                    case 3:  handle_konamiscc_write(waddr, wdata, &bank8_ctx); break;
                     case 5:  handle_ascii8_write(waddr, wdata, &bank8_ctx); break;
                     case 6:  handle_ascii16_write(waddr, wdata, &ascii16_ctx); break;
                     case 7:  handle_konami_write(waddr, wdata, &bank8_ctx); break;
@@ -7554,6 +7692,7 @@ void __no_inline_not_in_flash_func(loadrom_fmpac)(uint32_t offset, bool cache_en
                             mapped = (addr >= 0x4000u && addr <= 0xBFFFu);
                             rel = addr - 0x4000u;
                             break;
+                        case 3:
                         case 5:
                         case 7:
                             mapped = (addr >= 0x4000u && addr <= 0xBFFFu);
@@ -7936,7 +8075,7 @@ int __no_inline_not_in_flash_func(main)()
     }
     bool wifi_support = (ctrl_wifi_support != 0u) && is_system_mapper(mapper);
 
-    if (audio_mode == AUDIO_MODE_MSX_MUSIC) {
+    if (audio_mode == AUDIO_MODE_MSX_MUSIC && !system_mapper) {
         debug_trace("DBG launch load fmpac");
         loadrom_fmpac(rom_offset, cache_enable, mapper);
         continue;

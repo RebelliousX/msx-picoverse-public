@@ -65,7 +65,7 @@ static unsigned char record_supports_dual_psg(const ROMRecord *record) {
 }
 
 static unsigned char record_supports_msx_music(const ROMRecord *record) {
-    return !record_is_folder(record) && !record_is_system_rom(record) && !record_supports_scc_audio(record);
+    return !record_is_folder(record) && (!record_is_system_rom(record) || record_is_sunrise_system_rom(record));
 }
 
 static void send_detect_mapper(unsigned int index) {

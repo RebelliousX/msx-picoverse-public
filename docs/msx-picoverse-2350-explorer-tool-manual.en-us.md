@@ -264,7 +264,7 @@ If a ROM mapper is unknown, the screen will briefly show "Detecting..." while th
 
 Explorer treats audio profiles as mutually exclusive: a ROM can run with no extra audio, SCC, SCC+, Dual PSG, or MSX-MUSIC, but not multiple cartridge audio engines at the same time.
 
-The **PSG** field is independent from the Audio profile. When set to **Yes**, Explorer mirrors writes to the primary MSX PSG ports `0xA0` and `0xA1`, generates matching AY/YM audio on the Pico, and sends that audio through the cartridge I2S DAC. The real MSX PSG is not disabled; the option provides a DAC-side copy of the main PSG. It can be combined with **None**, **SCC**, **SCC+**, **Dual PSG**, or **MSX-MUSIC**, so PSG music can be heard through the cartridge DAC together with the selected cartridge audio profile. The option defaults to **No** each time the ROM screen is opened.
+The **PSG** field is independent from the Audio profile. When set to **Yes**, Explorer mirrors writes to the primary MSX PSG ports `0xA0` and `0xA1`, generates matching AY/YM audio on the Pico, and sends that audio through the cartridge I2S DAC. The real MSX PSG is not disabled; the option provides a DAC-side copy of the main PSG. It can be combined with **None**, **SCC**, **SCC+**, **Dual PSG**, or **MSX-MUSIC**, so PSG music can be heard through the cartridge DAC together with the selected cartridge audio profile. When **Dual PSG** and **PSG: Yes** are enabled together, Explorer routes Dual PSG to the left channel and the mirrored primary PSG to the right channel for a stereo split. The option defaults to **No** each time the ROM screen is opened.
 
 The SCC and SCC+ audio profiles work with ROMs using the Konami SCC mapper (`KonSCC`) or the Manbow2 mapper (`MANBW2`). When a ROM is detected as `KonSCC` or `MANBW2`, the ROM screen pre-selects **SCC** in the Audio field; you can change it to None or SCC+ before pressing Run. Dual PSG and MSX-MUSIC are not offered for these mappers because the cartridge audio slot is reserved for SCC/SCC+.
 
@@ -288,7 +288,7 @@ For firmware architecture, port handling, audio routing, and LoadROM/Explorer di
 
 Explorer can also mirror the normal MSX PSG output through the cartridge DAC. This is controlled by the separate **PSG** field on the ROM screen, not by the Audio profile field.
 
-When **PSG: Yes** is selected, the Pico captures writes to the primary PSG ports `0xA0` and `0xA1`, feeds them to an AY/YM-compatible `emu2149` instance, and mixes the generated samples into the active I2S audio stream. If no other cartridge audio profile is selected, Explorer starts a PSG-only I2S audio loop. If SCC, SCC+, Dual PSG, or MSX-MUSIC is selected, the primary PSG mirror is mixed into that profile's DAC stream.
+When **PSG: Yes** is selected, the Pico captures writes to the primary PSG ports `0xA0` and `0xA1`, feeds them to an AY/YM-compatible `emu2149` instance, and mixes the generated samples into the active I2S audio stream. If no other cartridge audio profile is selected, Explorer starts a PSG-only I2S audio loop. If SCC, SCC+, Dual PSG, or MSX-MUSIC is selected, the primary PSG mirror is mixed into that profile's DAC stream. In the specific **Dual PSG + PSG** combination, Explorer outputs the Dual PSG stream on left and the primary PSG mirror on right.
 
 This does not replace or mute the physical PSG inside the MSX. It is useful when you want ROM PSG music and effects on the same cartridge DAC output as SCC, Dual PSG, or MSX-MUSIC.
 
