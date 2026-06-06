@@ -805,7 +805,7 @@ void helpMenu()
     Locate(0, 4);
     printf("LEFT/RIGHT  Change page or option");
     Locate(0, 5);
-    printf("ENTER/SPACE Open folder/details/action");
+    printf("ENTER Detail SPACE Run");
     Locate(0, 6);
     printf("ESC         Back or leave folder");
     Locate(0, 7);
@@ -1033,8 +1033,10 @@ void navigateMenu()
                         enter_directory(records[currentIndex % FILES_PER_PAGE].Name);
                     }
                     refresh_menu_state(0);
-                } else {
+                } else if (key == 13 || record_is_mp3(&records[currentIndex % FILES_PER_PAGE])) {
                     show_rom_screen((unsigned int)currentIndex);
+                } else {
+                    quick_run_rom((unsigned int)currentIndex);
                 }
                 break;
         }

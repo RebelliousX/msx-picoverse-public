@@ -10,6 +10,8 @@ For RP2350, the current LoadROM package is:
 
 > **Important:** SCC/SCC+ emulation options (`-scc`, `-sccplus`), the secondary AY-3-8910 dual PSG option (`-d`), and the MSX-MUSIC/YM2413 option (`-f` or `-fmpac`) are supported by the current RP2350 LoadROM package (`2350/software/loadrom.pio`). Exactly one on-cartridge audio mode can be active per UF2 image.
 
+> **OPL4 / MoonSound:** The `-4` / `--opl4` option builds a dedicated, standalone OPL4 / YMF278B / MoonSound cartridge instead of a ROM loader. It is mutually exclusive with every other mode and does not take a ROM file. See [Standalone OPL4 / MoonSound cartridge](#standalone-opl4--moonsound-cartridge).
+
 ---
 
 ## Overview
@@ -51,16 +53,41 @@ loadrom.exe [options] [romfile]
 - `-sccplus`, `--sccplus` : Enable SCC+ (enhanced) sound emulation. For embedded ROM builds, this applies to Konami SCC or Manbow2 mapper ROMs. With `-c1` or `-c2`, it enables SCC+ playback for compatible ROMs uploaded later through `SROM.COM /D15`.
 - `-d`, `--dual-psg` : Enable secondary AY-3-8910 (PSG) emulation on I/O ports `0x10` (register select) and `0x11` (data). The Pico captures `OUT (0x10/0x11),A` writes via PIO1 and streams a mixed signal to the I2S DAC alongside the host MSX's PSG. Only valid with external ROM files whose mapper is not Konami SCC or Manbow2 (those mappers carry an on-cartridge SCC chip and reserve the second audio slot for SCC emulation).
 - `-f`, `-fmpac` : Enable MSX-MUSIC / YM2413 emulation on I/O ports `0x7C` (register select) and `0x7D` (data). The Pico captures OPLL writes via PIO1 and streams the generated FM audio to the I2S DAC. The UF2 also embeds the FM-PAC BIOS and exposes it in an expanded FM-PAC subslot so ROMs that use MSX-MUSIC BIOS calls can find it. Only valid with non-SYSTEM external ROM files.
+- `-4`, `--opl4` : Build a dedicated, standalone OPL4 / YMF278B / MoonSound cartridge. This is **not** a ROM loader: the UF2 contains only the OPL4 firmware and the 2 MB YRW801-M wave ROM, turning the cartridge into a MoonSound-compatible sound device (2 MB wave ROM + 2 MB PCM sample RAM) on the standard MoonSound I/O ports. It does not take a ROM file and is mutually exclusive with every other option.
 - `-o <filename>`, `--output <filename>` : Override the UF2 output name (default `loadrom.uf2`).
 - Positional argument: the ROM file to embed. Required for normal ROM loading; not accepted with `-s1`/`-m1`/`-s2`/`-m2`/`-c1`/`-c2`.
 
 `-s1`, `-m1`, `-s2`, `-m2`, `-c1`, and `-c2` are mutually exclusive. `-w` is valid only with `-s1`, `-m1`, `-s2`, or `-m2`. The audio options `-scc`, `-sccplus`, `-d`, and `-f`/`-fmpac` are mutually exclusive — only one on-cartridge audio engine can be active per UF2 image. `-d` is additionally rejected for Konami SCC and Manbow2 ROMs, while `-d` and `-f`/`-fmpac` are rejected for the embedded Sunrise/Carnivore2 system modes. `-f`/`-fmpac` is also rejected for Konami SCC and Manbow2 mapper ROMs. If conflicting options are provided, the tool exits with an error.
+
+`-4`/`--opl4` is fully standalone: it cannot be combined with any other option (no Sunrise/Carnivore2 mode, no audio flag, no `-w`, and no ROM file). If `-4` is mixed with any of those, the tool exits with an error.
 
 For the firmware architecture behind `-d`, see the [PicoVerse 2350 Dual PSG implementation guide](./msx-picoverse-2350-dualpsg.md).
 
 When `-f` or `-fmpac` is selected, LoadROM keeps the selected game mapper active and adds the FM-PAC BIOS/register area in the cartridge's expanded slot layout. The Pico responds to both direct YM2413 I/O writes and FM-PAC memory-mapped register writes at `0x7FF4`/`0x7FF5`.
 
 For the firmware architecture behind `-f` / `-fmpac`, see the [PicoVerse 2350 MSX-MUSIC / FM-PAC implementation guide](./msx-picoverse-2350-fmpac.md).
+
+### Standalone OPL4 / MoonSound cartridge
+
+The `-4` / `--opl4` option produces a firmware-only UF2 that turns the PicoVerse 2350 into a dedicated **OPL4 (Yamaha YMF278B) / MoonSound** sound cartridge. Unlike every other LoadROM mode, it does not embed an MSX ROM and does not load any game — the cartridge is purely a MoonSound-compatible sound device.
+
+What the cartridge provides:
+
+- Full **YMF278B**: OPL3 FM (18 channels) plus the 24-voice PCM wavetable engine.
+- The **2 MB YRW801-M** wave ROM (embedded in the UF2) and **2 MB of PCM sample RAM**.
+- The standard MoonSound host I/O ports: `0x7E`/`0x7F` (wavetable) and `0xC4`–`0xC7` (FM).
+- 16-bit stereo audio at 44.1 kHz through the on-cartridge I2S DAC.
+
+Because `-4` is standalone, it cannot be combined with any Sunrise/Carnivore2 mode, any other audio flag (`-scc`, `-sccplus`, `-d`, `-f`/`-fmpac`), `-w`, or a ROM file. The only other accepted option is `-o` to rename the output.
+
+Usage:
+
+```
+loadrom.exe -4                       # writes loadrom.uf2
+loadrom.exe -4 -o moonsound.uf2      # custom output name
+```
+
+Flash the resulting UF2 in BOOTSEL mode, then use any MoonSound software on the MSX — for example MoonTest (detection and RAM test), SETOPL4 (sample upload/playback), and MoonBlaster / MBWAVE (music playback). No microSD, USB drive, or ESP-01 is required for this mode.
 
 ### Mapper forcing via filename tags
 
@@ -161,6 +188,11 @@ Tags are case-insensitive. If no valid tag is present, the tool first computes t
    loadrom.exe -f "Game with MSX-MUSIC.rom"
    loadrom.exe -fmpac "Game with FM music.rom"
    ```
+   OPL4 / MoonSound standalone cartridge (no ROM file):
+   ```
+   loadrom.exe -4
+   loadrom.exe -4 -o moonsound.uf2
+   ```
 4. Review the console output (name, size, mapper, and flash offset).
 5. Hold BOOTSEL while connecting the PicoVerse 2350 to USB.
 6. Copy the generated UF2 to the `RPI-RP2` drive.
@@ -211,6 +243,8 @@ The UF2 writer sets `UF2_FLAG_FAMILYID_PRESENT` and uses the RP2350 family ID (`
 | "Warning: -scc flag ignored" | ROM is not Konami SCC or Manbow2 mapper, or the selected Nextor mode is not `-c1`/`-c2` | Use a Konami SCC or Manbow2 ROM, or pair `-scc` with `-c1`/`-c2` for SROM-loaded Konami SCC titles. |
 | "Warning: -sccplus flag ignored" | ROM is not Konami SCC or Manbow2 mapper, or the selected Nextor mode is not `-c1`/`-c2` | Use a compatible ROM, or pair `-sccplus` with `-c1`/`-c2` for SROM-loaded SCC+ titles. |
 | "Error: -scc and -sccplus are mutually exclusive" | Both options were passed together | Use only one of the two options. |
+| `-4`/`--opl4` rejected or errors out | `-4` was combined with another mode, an audio flag, `-w`, or a ROM file | Use `-4` (optionally with `-o`) on its own; it is a standalone MoonSound build and accepts no other options or ROM file. |
+| MoonSound software does not detect the cartridge with `-4` | Wrong UF2 or board without the OPL4 audio/`/INT` wiring | Reflash a `-4` build and use a PicoVerse 2350 with the I2S DAC and `/INT` (GPIO40) connected. |
 | UF2 not recognized | Not in BOOTSEL, or wrong file | Enter BOOTSEL and copy the UF2 again. |
 | Name truncated in menu | Filename too long | Shorten the filename. |
 
@@ -232,6 +266,7 @@ The UF2 writer sets `UF2_FLAG_FAMILYID_PRESENT` and uses the RP2350 family ID (`
 - The tool does not verify ROM integrity beyond size and mapper heuristics.
 - SCC/SCC+ flags are applied for Konami SCC mapper (type 3) and Manbow2 mapper (type 14) ROMs; otherwise they are ignored with a warning.
 - SCC/SCC+ emulation is available in the current RP2350 LoadROM package.
+- The `-4` / `--opl4` OPL4 / MoonSound build is a standalone sound cartridge: it embeds no game ROM, ignores all other options, and overclocks the RP2350 to 300 MHz. It requires the I2S DAC and the `/INT` line (GPIO40) on the PicoVerse 2350 board.
 - Excessive flashing can wear out flash memory.
 
 ---
@@ -244,4 +279,4 @@ The UF2 writer sets `UF2_FLAG_FAMILYID_PRESENT` and uses the RP2350 family ID (`
 - Additional mapper heuristics.
 
 Author: Cristiano Almeida Goncalves  
-Last updated: 04/21/2026
+Last updated: 06/06/2026

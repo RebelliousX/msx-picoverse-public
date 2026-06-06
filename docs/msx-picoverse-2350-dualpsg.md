@@ -21,9 +21,9 @@ Dual PSG is intended for homebrew, music players, demos, or patched games that k
 
 ## Compatibility rules
 
-PicoVerse treats cartridge audio profiles as a single mutually exclusive mode per ROM. A ROM may run with no extra cartridge audio, SCC, SCC+, Dual PSG, or MSX-MUSIC, but not more than one of those profiles at the same time.
+PicoVerse treats cartridge audio profiles as a single mutually exclusive mode per ROM. A ROM may run with no extra cartridge audio, SCC, SCC+, external SCC/SCC+, Dual PSG, or MSX-MUSIC, but not more than one of those profiles at the same time.
 
-Explorer's primary **PSG** mirror is independent from that profile choice. It can be enabled alongside None, SCC, SCC+, Dual PSG, or MSX-MUSIC for regular ROM launches.
+Explorer's primary **PSG** mirror is independent from that profile choice. It can be enabled alongside None, SCC, SCC+, external SCC/SCC+, Dual PSG, or MSX-MUSIC for regular ROM launches.
 
 Dual PSG is allowed for regular ROM mappers that do not already reserve the cartridge audio slot for another sound engine.
 
@@ -193,6 +193,8 @@ The ROM detail screen supports these profiles:
 - `None`
 - `SCC`
 - `SCC+`
+- `SCC - External`
+- `SCC+ - External`
 - `Dual PSG`
 - `MSX-MUSIC`
 
@@ -200,8 +202,8 @@ The ROM detail screen also has an independent **PSG** Yes/No field. It defaults 
 
 The menu only cycles through profiles valid for the selected record:
 
-- Konami SCC and Manbow2 ROMs can use `None`, `SCC`, or `SCC+`.
-- Regular non-SYSTEM, non-SCC ROMs can use `None`, `Dual PSG`, or `MSX-MUSIC`.
+- Konami SCC and Manbow2 ROMs can use `None`, `SCC`, `SCC+`, `SCC - External`, or `SCC+ - External`.
+- Regular non-SYSTEM ROMs can use `None`, `SCC - External`, `SCC+ - External`, `Dual PSG`, or `MSX-MUSIC` when the selected mapper supports that profile.
 - SYSTEM entries and folders do not offer Dual PSG.
 
 When the user selects **Action: Run**, the MSX menu writes the selected audio profile to `CTRL_AUDIO` in the Explorer control window. The Pico firmware stores that byte as `ctrl_audio_selection`.

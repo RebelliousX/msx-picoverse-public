@@ -38,7 +38,7 @@ Use the Explorer tool when you want a menu that loads ROMs from flash, microSD, 
 
 ### Explorer menu capabilities
 
-- **Folder navigation**: Organize your ROMs into folders on the microSD card. Enter folders by pressing Enter/Space on a folder name, and navigate back to parent folders using the ".." entry or by pressing Esc.
+- **Folder navigation**: Organize your ROMs into folders on the microSD card. Enter folders by pressing Enter or Space on a folder name, and navigate back to parent folders using the ".." entry or by pressing Esc.
 - **Search** by ROM name directly on the MSX by pressing `/`, typing part of the name, and pressing Enter to jump to the first match. Note that this feature only searches ROMs inside the current folder. When in the root, it searches all flash and SD ROMs located in the root.
 - **File Hunter browser**: Press `F3` to browse online ROM results from File Hunter through the ESP-01 WiFi module. Results show the ROM name, size, and source, and selected ROMs can be downloaded and saved to the microSD root.
 - **WiFi configuration**: Press `F4` to enter the WiFi setup flow used by the ESP8266P-compatible WiFi firmware.
@@ -117,7 +117,8 @@ For the best experience with very large ROM collections, consider organizing ROM
 
 - **Up/Down**: Move selection up or down in the list.
 - **Left/Right**: Change pages (when the list spans multiple pages).
-- **Enter/Space**: Open the selected entry. Folders enter the directory, MP3 entries open the MP3 player screen, and ROM entries open the ROM screen.
+- **Enter**: Open the selected entry. Folders enter the directory, MP3 entries open the MP3 player screen, and ROM entries open the ROM screen.
+- **Space**: Enter folders and open MP3 entries like Enter. On ROM entries, quick-run the ROM using saved `.PVC` options when present or default settings when no `.PVC` file exists. Unknown SD ROM mappers are detected before launch.
 - **Esc**: Navigate back to the parent folder (when inside a folder). Same as pressing Enter/Space on the ".." entry.
 - **F1**: Switch the Explorer list to flash ROMs.
 - **F2**: Switch the Explorer list to microSD files and folders.
@@ -174,7 +175,8 @@ The network state appears in the lower-left status area as "Network: Online" / "
 
 - **Up/Down**: Move through the result list.
 - **Left/Right**: Change result pages.
-- **Enter/Space**: Open the selected ROM detail screen.
+- **Enter**: Open the selected ROM detail screen.
+- **Space**: Quick-run the selected ROM with saved `.PVC` options or default settings. If the ROM is on microSD and its mapper has not been detected yet, Explorer detects it before launching.
 - **/**: Search File Hunter. Type a query and press Enter to load matching results. Press Esc at the search prompt to cancel.
 - **F1**: Leave File Hunter and return to the flash ROM list.
 - **F2**: Leave File Hunter and return to the microSD list.
@@ -246,7 +248,7 @@ MP3 decoding runs on the Pico side and streams stereo PCM to the cartridge I2S D
 Selecting a ROM entry opens a ROM details screen before running:
 
 - **Mapper**: Shows the detected mapper (for SD ROMs) and allows manual override using Left/Right.
-- **Audio**: Choose an audio profile with Left/Right (None, SCC, SCC+, Dual PSG, MSX-MUSIC). The menu only cycles through profiles supported by the selected ROM mapper.
+- **Audio**: Choose an audio profile with Left/Right (None, SCC, SCC+, external SCC/SCC+, Dual PSG, MSX-MUSIC, SFG01/SFG05). The menu only cycles through profiles supported by the selected ROM mapper.
 - **PSG**: Choose whether to mirror the MSX primary PSG writes through the cartridge DAC. The default is No.
 - **Wifi**: For Sunrise Nextor entries only, choose whether to expose the ESP8266P WiFi BIOS before running. The default is No.
 - **Action: Run**: Press Enter to launch the ROM.
@@ -259,22 +261,30 @@ If a ROM mapper is unknown, the screen will briefly show "Detecting..." while th
 - **None**: No extra cartridge audio profile. The ROM still uses the MSX's built-in PSG normally.
 - **SCC**: Enables Konami SCC (standard) sound emulation. Use this for games that use the standard SCC chip with shared channel 4/5 waveforms (e.g., *Space Manbow*, *Salamander*, *Nemesis 2*, *Gradius 2*).
 - **SCC+**: Enables Konami SCC+ (enhanced/SCC-I) sound emulation. Use this for games or homebrew that require SCC+ features with independent channel 4/5 waveforms.
+- **SCC - External**: Exposes a virtual SCC cartridge in a secondary subslot while keeping the selected game mapper in the primary game subslot. Use this for ROMs that look for an SCC cartridge in another slot.
+- **SCC+ - External**: Same as **SCC - External**, but with the enhanced SCC+ register model.
+- **YM2151 (SFG05)**: Exposes a Yamaha SFG-05-like YM2151 cartridge surface and the SFG-05 BIOS image in a secondary subslot while keeping the selected game mapper in the primary game subslot. Use this for ROMs that scan another slot for SFG/YM2151 hardware.
+- **YM2151 (SFG01)**: Exposes the SFG-01 BIOS image with the same YM2151 register surface for software that distinguishes SFG01/SFG05 setups.
 - **Dual PSG**: Enables a secondary AY-3-8910 compatible PSG on I/O ports `0x10` (register select) and `0x11` (data write), matching the common Carnivore2 / MegaFlashROM / FlashJacks style second-PSG convention. Use this for ROMs or patches that explicitly support dual PSG music.
-- **MSX-MUSIC**: Enables YM2413/MSX-MUSIC audio using an FM-PAC-compatible BIOS from the Explorer UF2 flash payload. Use this for regular ROMs that can use MSX-MUSIC ports `0x7C` and `0x7D`.
+- **MSX-MUSIC**: Enables YM2413/MSX-MUSIC audio using an FM-PAC-compatible BIOS from the Explorer UF2 flash payload. Use this for regular ROMs that can use MSX-MUSIC ports `0x7C` and `0x7D`; Sunrise Nextor SYSTEM entries also expose the FM-PAC BIOS in a free expanded subslot.
 
-Explorer treats audio profiles as mutually exclusive: a ROM can run with no extra audio, SCC, SCC+, Dual PSG, or MSX-MUSIC, but not multiple cartridge audio engines at the same time.
+Explorer treats audio profiles as mutually exclusive: a ROM can run with no extra audio, SCC, SCC+, external SCC/SCC+, Dual PSG, MSX-MUSIC, or YM2151/SFG, but not multiple cartridge audio engines at the same time.
 
-The **PSG** field is independent from the Audio profile. When set to **Yes**, Explorer mirrors writes to the primary MSX PSG ports `0xA0` and `0xA1`, generates matching AY/YM audio on the Pico, and sends that audio through the cartridge I2S DAC. The real MSX PSG is not disabled; the option provides a DAC-side copy of the main PSG. It can be combined with **None**, **SCC**, **SCC+**, **Dual PSG**, or **MSX-MUSIC**, so PSG music can be heard through the cartridge DAC together with the selected cartridge audio profile. When **Dual PSG** and **PSG: Yes** are enabled together, Explorer routes Dual PSG to the left channel and the mirrored primary PSG to the right channel for a stereo split. The option defaults to **No** each time the ROM screen is opened.
+The **PSG** field is independent from the Audio profile. When set to **Yes**, Explorer mirrors writes to the primary MSX PSG ports `0xA0` and `0xA1`, generates matching AY/YM audio on the Pico, and sends that audio through the cartridge I2S DAC. The real MSX PSG is not disabled; the option provides a DAC-side copy of the main PSG. It can be combined with **None**, **SCC**, **SCC+**, external SCC/SCC+, **Dual PSG**, **MSX-MUSIC**, or **YM2151 (SFG01/SFG05)**, so PSG music can be heard through the cartridge DAC together with the selected cartridge audio profile. When **Dual PSG** and **PSG: Yes** are enabled together, Explorer routes Dual PSG to the left channel and the mirrored primary PSG to the right channel for a stereo split. The option defaults to **No** each time the ROM screen is opened.
 
-The SCC and SCC+ audio profiles work with ROMs using the Konami SCC mapper (`KonSCC`) or the Manbow2 mapper (`MANBW2`). When a ROM is detected as `KonSCC` or `MANBW2`, the ROM screen pre-selects **SCC** in the Audio field; you can change it to None or SCC+ before pressing Run. Dual PSG and MSX-MUSIC are not offered for these mappers because the cartridge audio slot is reserved for SCC/SCC+.
+The SCC and SCC+ audio profiles work with ROMs using the Konami SCC mapper (`KonSCC`) or the Manbow2 mapper (`MANBW2`). When a ROM is detected as `KonSCC` or `MANBW2`, the ROM screen pre-selects **SCC** in the Audio field; you can change it to None, SCC+, or one of the external SCC profiles before pressing Run. Dual PSG and MSX-MUSIC are not offered for these mappers because the cartridge audio slot is reserved for SCC/SCC+.
 
-The Dual PSG and MSX-MUSIC profiles are available for regular non-SYSTEM ROMs that are not Konami SCC or Manbow2. They are not offered for Sunrise/Nextor SYSTEM entries, NEO system entries, folders, or SCC-capable ROMs.
+The external SCC and SCC+ profiles are available for non-SYSTEM ROM entries and Sunrise Nextor SYSTEM entries. Non-SYSTEM ROMs launch in an expanded cartridge layout with the selected game mapper in subslot 0 and the virtual SCC/SCC+ cartridge surface in subslot 1. Sunrise Nextor SYSTEM launches keep Nextor storage in its normal subslot, keep mapper RAM available only for the explicit `+ 1MB Mapper` entries, and place the virtual SCC/SCC+ cartridge in subslot 2 without WiFi or subslot 3 when WiFi is enabled. This is intended for games, loaders, or Nextor BASIC sessions that explicitly scan for an SCC cartridge in another slot.
+
+The YM2151 SFG01/SFG05 profiles are available for supported non-SYSTEM ROM entries and Sunrise Nextor SYSTEM entries. Non-SYSTEM ROMs use the same expanded layout as the external SCC profiles: subslot 0 remains the selected game mapper, while subslot 1 exposes an SFG-like memory-mapped YM2151 surface and the selected Yamaha SFG BIOS image. Sunrise Nextor SYSTEM launches use a mapper-backed expanded layout so Nextor still has RAM available; the SFG surface is placed in subslot 2 without WiFi or subslot 3 when WiFi is enabled. The implemented SFG memory window responds at slot-local `0x3FF0` for the YM2151 address register and `0x3FF1` for YM2151 data/status. MIDI/keyboard-facing SFG addresses return idle values in this first implementation. The Explorer UF2 stores `SFG_64K.ROM` as a hidden flash payload; the SFG05 profile exposes the first 32K BIOS image and the SFG01 profile exposes the second 32K BIOS image.
+
+The Dual PSG and MSX-MUSIC profiles are available for regular non-SYSTEM ROMs that are not Konami SCC or Manbow2, and Sunrise Nextor SYSTEM entries can use the SYSTEM audio service for the supported SYSTEM profiles. When MSX-MUSIC is selected for Sunrise Nextor, Explorer keeps the Nextor storage layout active and places the FM-PAC BIOS/control surface in subslot 2 without WiFi or subslot 3 with WiFi. These cartridge audio profiles are not offered for NEO system entries, folders, or SCC-capable ROMs.
 
 Primary PSG mirroring is intended for normal ROM launches from flash or microSD, including ROMs downloaded from File Hunter after they have been saved to the card. SYSTEM/storage entries that reserve core 1 for storage backends do not use the PSG DAC mirror path.
 
 ## SCC/SCC+ sound emulation
 
-The PicoVerse 2350 Explorer firmware can emulate the Konami SCC and SCC+ (SCC-I) sound chips in hardware, generating audio through an I2S DAC connected to the RP2350. This gives MSX games that use SCC or SCC+ sound their full soundtrack without requiring an original SCC cartridge.
+The PicoVerse 2350 Explorer firmware can emulate the Konami SCC and SCC+ (SCC-I) sound chips in hardware, generating audio through an I2S DAC connected to the RP2350. This gives MSX games that use SCC or SCC+ sound their full soundtrack without requiring an original SCC cartridge. Native SCC/SCC+ profiles attach the emulated SCC to Konami SCC or Manbow2 mapper launches; external SCC/SCC+ profiles expose the emulated chip as a separate virtual cartridge subslot for non-SYSTEM ROMs and Sunrise Nextor SYSTEM entries that search another slot for SCC hardware.
 
 ## Dual PSG sound emulation
 
@@ -288,7 +298,7 @@ For firmware architecture, port handling, audio routing, and LoadROM/Explorer di
 
 Explorer can also mirror the normal MSX PSG output through the cartridge DAC. This is controlled by the separate **PSG** field on the ROM screen, not by the Audio profile field.
 
-When **PSG: Yes** is selected, the Pico captures writes to the primary PSG ports `0xA0` and `0xA1`, feeds them to an AY/YM-compatible `emu2149` instance, and mixes the generated samples into the active I2S audio stream. If no other cartridge audio profile is selected, Explorer starts a PSG-only I2S audio loop. If SCC, SCC+, Dual PSG, or MSX-MUSIC is selected, the primary PSG mirror is mixed into that profile's DAC stream. In the specific **Dual PSG + PSG** combination, Explorer outputs the Dual PSG stream on left and the primary PSG mirror on right.
+When **PSG: Yes** is selected, the Pico captures writes to the primary PSG ports `0xA0` and `0xA1`, feeds them to an AY/YM-compatible `emu2149` instance, and mixes the generated samples into the active I2S audio stream. If no other cartridge audio profile is selected, Explorer starts a PSG-only I2S audio loop. If SCC, SCC+, external SCC/SCC+, Dual PSG, MSX-MUSIC, or YM2151/SFG is selected, the primary PSG mirror is mixed into that profile's DAC stream. In the specific **Dual PSG + PSG** combination, Explorer outputs the Dual PSG stream on left and the primary PSG mirror on right.
 
 This does not replace or mute the physical PSG inside the MSX. It is useful when you want ROM PSG music and effects on the same cartridge DAC output as SCC, Dual PSG, or MSX-MUSIC.
 
@@ -298,10 +308,18 @@ The PicoVerse 2350 Explorer firmware can emulate the YM2413/MSX-MUSIC audio chip
 
 MSX-MUSIC uses I/O ports `0x7C` for register select and `0x7D` for data writes, with synthesized audio routed to the same I2S DAC path used by the other Explorer audio profiles. The profile is mutually exclusive with SCC, SCC+, and Dual PSG, and is only offered for regular non-SYSTEM ROMs that are not Konami SCC or Manbow2.
 
+## YM2151 / Yamaha SFG emulation
+
+Explorer can expose a virtual Yamaha SFG01/SFG05-style YM2151 device for supported non-SYSTEM ROMs and Sunrise Nextor SYSTEM entries. For game ROMs, the selected game mapper stays in subslot 0 and the SFG-like surface appears in subslot 1. For Sunrise Nextor SYSTEM entries, Explorer keeps the Nextor ROM and mapper RAM layout active and places the SFG-like surface in the free expanded subslot.
+
+The SFG register window is memory-mapped, following the SFG layout used by emulator and hardware references: slot-local `0x3FF0` selects the YM2151 register, and slot-local `0x3FF1` writes YM2151 data or reads YM2151 status. Outside the top register aperture, the virtual SFG subslot reads from the selected 32K BIOS image stored in the Explorer flash payload.
+
 ## External references
 
 - NataliaPC MSX File Hunter Browser: https://github.com/nataliapc/msx_filehunterbrowser
 - File Hunter service: http://file-hunter.com/
+- RBSC SFG_Cartridge project, used as an SFG register-map and cartridge behavior reference: https://github.com/RBSC/SFG_Cartridge
+- openMSX Yamaha SFG implementation, used as an emulator behavior reference: https://github.com/openMSX/openMSX
 
 Author: Cristiano Goncalves
-Last updated: 05/28/2026
+Last updated: 06/04/2026

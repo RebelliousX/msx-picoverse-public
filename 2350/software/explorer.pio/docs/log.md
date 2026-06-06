@@ -1,6 +1,31 @@
 # Change Log
 
-## v2.31
+## PicoVerse 2350 Explorer v2.33
+
+- Bumped Explorer to v2.33.
+- Improved MSX-MUSIC output with a soft-knee limiter, DC blocking, and light low-pass filtering so dense FM arrangements avoid hard clipping while normal-level material remains linear.
+- Refined the ROM detail workflow with chip-style audio profile labels, aligned option text, ENTER-to-detail behavior, SPACE quick-run using saved/default `.PVC` options, and mapper detection before launch when needed.
+- Added external SCC/SCC+ profiles for non-SYSTEM ROMs, keeping the game mapper in expanded subslot 0 and exposing the virtual SCC/SCC+ surface in subslot 1.
+- Enabled external SCC/SCC+ profiles for Sunrise Nextor SYSTEM ROMs by exposing the virtual SCC/SCC+ cartridge in a free expanded subslot while keeping Nextor storage, optional WiFi, and optional mapper RAM in their existing subslots.
+- Fixed Sunrise Nextor external SCC/SCC+ startup by guarding SCC audio servicing until the I2S audio pool is fully initialized, avoiding an early core1 storage-backend fault during boot.
+- Added YM2151 (SFG05) and YM2151 (SFG01) profiles for non-SYSTEM ROMs, keeping the game mapper in subslot 0 and exposing an SFG-like YM2151 register surface plus the selected 32K Yamaha SFG BIOS image in subslot 1.
+- Enabled YM2151 (SFG05/SFG01) profiles for Sunrise Nextor SYSTEM ROMs by exposing the virtual SFG cartridge in a free expanded subslot while keeping mapper RAM available for Nextor.
+- Fixed the YM2151 (SFG05/SFG01) profiles so the plain "Nextor Sunrise IDE (SD/USB)" options no longer expose the 1MB mapper RAM (only the explicit "+ 1MB Mapper" options do), while still exposing the SFG cartridge subslot; gated the mapper RAM region, mapper memory subslot, and mapper I/O ports (0xFC-0xFF) behind a new `mapper_enable` flag in `loadrom_sunrise_sfg_common`.
+- Renamed the MSX menu's SFG05 audio profile to YM2164 (SFG05) and route SFG05 audio through YM2164/OPP test-register and Timer B behavior while leaving SFG01 as YM2151/OPM.
+- Exposed the FM-PAC BIOS for Sunrise Nextor SYSTEM ROMs when MSX-MUSIC is selected by launching a Sunrise + FM-PAC expanded-slot layout while keeping Nextor storage, optional WiFi, mapper RAM, and YM2413 audio servicing active.
+- Disabled the optional PSRAM `0xC0` post-QPI initialization command after LY68L6400S compatibility issues were reported by Ludovic Avot.
+- Matched the RBSC-style SFG top-128-byte control aperture outside the BIOS ROM window and mixed primary PSG mirror audio only when the mirrored PSG has audible channels.
+- Consolidated the bundled Nextor and SFG ROM payloads under `resources/` and updated the Explorer tool to embed them directly from that shared project folder.
+
+## PicoVerse 2350 Explorer v2.32
+
+- Bumped Explorer to v2.32.
+- Reworked MSX-MUSIC plus PSG mixing to follow the openMSX mixer model: keep FM and PSG as independent sources, apply per-device gain, accumulate them, and run DC removal on the final mixed output.
+- Removed the previous PSG-only DC filter and fixed 3:1 weighted blend that could make active PSG writes corrupt MSX-MUSIC playback.
+- Separated MSX-MUSIC and PSG output completely when both are enabled, routing FM and PSG to independent stereo channels instead of mixing their samples together.
+- Reduced MSX-MUSIC plus PSG runtime contention by using the fast PSG renderer only when primary PSG mirroring is paired with MSX-MUSIC and by servicing I/O between FM and PSG sample generation.
+
+## PicoVerse 2350 Explorer v2.31
 
 - Bumped Explorer to v2.31.
 - Mixed primary PSG mirroring into MSX-MUSIC with lower gain and DC filtering so MSX-MUSIC ROMs can enable PSG emulation without FM distortion.
@@ -11,7 +36,7 @@
 - Kept Sunrise Nextor SYSTEM ROMs on the Sunrise loader when MSX-MUSIC is selected instead of routing them through the FM-PAC ROM launcher.
 - Added KonamiSCC mapper handling to the MSX-MUSIC/FM-PAC launcher so SCC mapper ROMs still boot when MSX-MUSIC is selected.
 
-## v2.30
+## PicoVerse 2350 Explorer v2.30
 
 - Bumped Explorer to v2.30.
 - Enabled the primary PSG DAC mirror for Sunrise SYSTEM ROM launches through a reusable SYSTEM audio service, including Sunrise + Mapper modes without stealing mapper I/O or blocking mapper bootstrap.
@@ -19,7 +44,7 @@
 - Split Dual PSG and primary PSG mirror output into separate stereo channels when both are enabled.
 - Kept Sunrise SYSTEM PSG I/O serviced while producing audio buffers so non-mapper Sunrise launches remain stable with Dual PSG plus PSG mirror enabled.
 
-## v2.29
+## PicoVerse 2350 Explorer v2.29
 
 - Bumped Explorer to v2.29.
 - Applied each decoded MP3 frame's sample rate to the I2S output clock so MP3 files encoded at rates other than 44.1 kHz play at the correct pitch and speed.
@@ -40,7 +65,7 @@
 - Expanded File Hunter page records and detail rendering so 80-column ROM detail screens can show names up to the shared 71-character limit.
 
 
-## v2.28
+## PicoVerse 2350 Explorer v2.28
 
 - Bumped Explorer to v2.28.
 - Added microSD MP3 discovery, MP3 list/detail UI, play counter/status display, full filename rendering, and Play/Stop plus Pause/Resume controls backed by the Pico MP3 decoder service.
@@ -56,12 +81,12 @@
 - Started MSX-MUSIC audio output only after the final FM-PAC ROM bus initialization releases `/WAIT`.
 - Added temporary USB CDC diagnostics, with TinyUSB host disabled and a CDC-only PicoVerse debug product descriptor, to capture MP3-to-ROM audio launch checkpoints without using UART.
 
-## v2.27
+## PicoVerse 2350 Explorer v2.27
 
 - Bumped Explorer to v2.27.
 - Raised the MSX-MUSIC/FM-PAC audio output gain to match the existing SCC, SCC+, and Dual PSG I2S volume boost while preserving sample clipping protection.
 
-## v2.26
+## PicoVerse 2350 Explorer v2.26
 
 - Bumped Explorer to v2.26.
 - Added an MSX-MUSIC audio profile to the MSX Explorer ROM detail screen for non-system, non-SCC-class ROMs.
@@ -73,7 +98,7 @@
 - Removed the WiFi setup hint and F4 special handling from the help page return prompt.
 - Increased the Explorer microSD ROM size limit and PSRAM SD ROM buffer from 2 MB to 4 MB.
 
-## v2.25
+## PicoVerse 2350 Explorer v2.25
 
 - Bumped Explorer to v2.25.
 - Reworked ROM audio selection around named, mutually exclusive audio profiles so new audio chips can be added without conflicting with SCC or system ROM options.

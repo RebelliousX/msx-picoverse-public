@@ -2,5 +2,6 @@
 #define SCREEN_ROM_H
 
 void show_rom_screen(unsigned int index);
+void quick_run_rom(unsigned int index);
 
 #endif

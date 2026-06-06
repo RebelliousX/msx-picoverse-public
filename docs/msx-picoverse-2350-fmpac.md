@@ -357,7 +357,7 @@ For unmapped subslots or unsupported windows, reads return `0xFF`.
 ## Limitations
 
 - Only one Pico-side cartridge audio engine is active per UF2 image. MSX-MUSIC cannot be combined with SCC, SCC+, or Dual PSG in the same image.
-- FM-PAC/MSX-MUSIC is not enabled for embedded Sunrise/Carnivore2 system modes.
+- Explorer can expose FM-PAC/MSX-MUSIC for Sunrise Nextor SYSTEM entries by placing the FM-PAC BIOS/control surface in a free expanded subslot while keeping Nextor storage active; LoadROM standalone Sunrise/Carnivore2 system modes do not use this FM-PAC wrapper.
 - PAC SRAM is volatile. It is modeled in RAM and is not persisted across power cycles.
 - The FM-PAC BIOS payload is an embedded third-party BIOS binary; distribution and use must respect the rights of the BIOS copyright holders.
 - The implementation models the FM-PAC BIOS/register behavior needed by LoadROM titles, not a complete standalone FM-PAC cartridge with persistent SRAM management.

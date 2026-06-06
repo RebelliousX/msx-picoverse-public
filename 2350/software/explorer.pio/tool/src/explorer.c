@@ -27,6 +27,7 @@
 #include "wifibios.h"
 #include "esp8266p_rom.h"
 #include "fmpac_bios.h"
+#include "sfg_bios.h"
 #include "mapper_detect.h"
 
 #ifndef APP_VERSION
@@ -40,10 +41,11 @@
 #define WIFI_CONFIG_ROM_SIZE    (8 * 1024)      // Hidden WiFi configuration ROM payload stored after config area
 #define WIFI_BIOS_ROM_SIZE      (16 * 1024)     // Hidden ESP8266P UNAPI BIOS payload used by Sunrise WiFi support
 #define FMPAC_BIOS_ROM_SIZE     (64 * 1024)     // Hidden FM-PAC BIOS payload used by Explorer MSX-MUSIC support
+#define SFG_BIOS_ROM_SIZE       (64 * 1024)     // Hidden Yamaha SFG ROM payload used by Explorer YM2151/SFG support
 #define MAX_FILE_NAME_LENGTH    71              // Maximum length of a ROM name on the 80-column detail screen
 #define FLASH_START             0x10000000      // Start of the flash memory on the Raspberry Pi Pico
 #define MAX_ROM_FILES           128             // Maximum number of ROM files
-#define MAX_TOTAL_ROM_SIZE      (14U * 1024U * 1024U) // Cap combined ROM payload to 14 MB
+#define MAX_TOTAL_ROM_SIZE      (12U * 1024U * 1024U) // Cap combined visible ROM payload to 12 MB
 #define MAX_ROM_SIZE            15*1024*1024    // Maximum size of a ROM file
 #define MIN_ROM_SIZE            8192            // Minimum size of a ROM file
 #define MAX_ANALYSIS_SIZE       131072          // 128KB for the mapper analysis
@@ -340,7 +342,7 @@ int main(int argc, char *argv[])
         const char *name;
     } nextor_entries[] = {
         { use_sunrise_sd,  ROM_TYPE_SUNRISE_SD,        "Nextor Sunrise IDE (SD)" },
-        { use_mapper_sd,   ROM_TYPE_SUNRISE_MAPPER_SD, "Nextor Sunrise + 1MB Mapper (SD)" },
+        { use_mapper_sd,   ROM_TYPE_SUNRISE_MAPPER_SD, "Nextor Sunrise IDE + 1MB Mapper (SD)" },
         { use_sunrise_usb, ROM_TYPE_SUNRISE,           "Nextor Sunrise IDE (USB)" },
         { use_mapper_usb,  ROM_TYPE_SUNRISE_MAPPER,    "Nextor Sunrise + 1MB Mapper (USB)" },
     };
@@ -352,7 +354,7 @@ int main(int argc, char *argv[])
     FileInfo files[MAX_ROM_FILES]; // Array to track discovered ROM files
     int file_count = 0;
     int file_index = 1;
-    uint32_t base_offset = TARGET_FILE_SIZE + WIFI_CONFIG_ROM_SIZE + WIFI_BIOS_ROM_SIZE + FMPAC_BIOS_ROM_SIZE; // Visible ROMs start after hidden payloads
+    uint32_t base_offset = TARGET_FILE_SIZE + WIFI_CONFIG_ROM_SIZE + WIFI_BIOS_ROM_SIZE + FMPAC_BIOS_ROM_SIZE + SFG_BIOS_ROM_SIZE; // Visible ROMs start after hidden payloads
     size_t total_rom_size = 0;
     size_t config_offset = 0;
     uint8_t *config_buffer = (uint8_t *)malloc(CONFIG_AREA_SIZE); // Configuration area buffer
@@ -364,7 +366,7 @@ int main(int argc, char *argv[])
 
     // Include embedded Nextor ROM entries, one per selected option.
     if (include_nextor) {
-        uint32_t nextor_size = sizeof(___nextor_kernel_Nextor_2_1_4_SunriseIDE_MasterOnly_ROM);
+        uint32_t nextor_size = sizeof(___resources_Nextor_2_1_4_SunriseIDE_MasterOnly_ROM);
         for (int ne = 0; ne < (int)(sizeof(nextor_entries) / sizeof(nextor_entries[0])); ++ne) {
             char nextor_rom_name[MAX_FILE_NAME_LENGTH] = {0};
             uint32_t nextor_offset;
@@ -571,7 +573,7 @@ int main(int argc, char *argv[])
     }
 
     // Sanity check embedded Nextor ROM size
-    const size_t nextor_rom_size = sizeof(___nextor_kernel_Nextor_2_1_4_SunriseIDE_MasterOnly_ROM);
+    const size_t nextor_rom_size = sizeof(___resources_Nextor_2_1_4_SunriseIDE_MasterOnly_ROM);
     if (include_nextor && nextor_rom_size == 0) {
         printf("Embedded Nextor ROM payload is empty\n");
         free(config_buffer);
@@ -602,8 +604,16 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    // Final flash image layout: [firmware][menu ROM][config area][WiFi config ROM][ESP8266P BIOS][FM-PAC BIOS][Nextor ROM + scanned ROM payloads]
-    const size_t total_size = firmware_size + MENU_COPY_SIZE + CONFIG_AREA_SIZE + WIFI_CONFIG_ROM_SIZE + WIFI_BIOS_ROM_SIZE + FMPAC_BIOS_ROM_SIZE + total_rom_size;
+    const size_t sfg_bios_rom_size = sizeof(___resources_SFG_64K_ROM);
+    if (sfg_bios_rom_size != SFG_BIOS_ROM_SIZE) {
+        printf("Embedded SFG BIOS must be %u bytes (found %zu)\n",
+               (unsigned)SFG_BIOS_ROM_SIZE, sfg_bios_rom_size);
+        free(config_buffer);
+        return 1;
+    }
+
+    // Final flash image layout: [firmware][menu ROM][config area][WiFi config ROM][ESP8266P BIOS][FM-PAC BIOS][SFG BIOS][Nextor ROM + scanned ROM payloads]
+    const size_t total_size = firmware_size + MENU_COPY_SIZE + CONFIG_AREA_SIZE + WIFI_CONFIG_ROM_SIZE + WIFI_BIOS_ROM_SIZE + FMPAC_BIOS_ROM_SIZE + SFG_BIOS_ROM_SIZE + total_rom_size;
     uint8_t *combined_buffer = (uint8_t *)malloc(total_size);
     if (!combined_buffer) {
         printf("Failed to allocate combined buffer\n");
@@ -637,6 +647,10 @@ int main(int argc, char *argv[])
     memcpy(combined_buffer + offset, ______loadrom_pio_fmpac_FMPCCMFC_BIN, fmpac_bios_rom_size);
     offset += FMPAC_BIOS_ROM_SIZE;
 
+    // Hidden Yamaha SFG BIOS exposed when an Explorer ROM is launched with YM2151/SFG.
+    memcpy(combined_buffer + offset, ___resources_SFG_64K_ROM, sfg_bios_rom_size);
+    offset += SFG_BIOS_ROM_SIZE;
+
 #ifdef DEBUG
     {
         const char *rom_dump_filename = "explorer.rom";
@@ -663,7 +677,7 @@ int main(int argc, char *argv[])
             if (!nextor_entries[ne].enabled) {
                 continue;
             }
-            memcpy(combined_buffer + offset, ___nextor_kernel_Nextor_2_1_4_SunriseIDE_MasterOnly_ROM, nextor_rom_size);
+            memcpy(combined_buffer + offset, ___resources_Nextor_2_1_4_SunriseIDE_MasterOnly_ROM, nextor_rom_size);
             offset += nextor_rom_size;
         }
     }

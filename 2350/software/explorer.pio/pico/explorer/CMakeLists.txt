@@ -52,6 +52,8 @@ set(EXPLORER_SOURCES
     emu2212.c
     emu2149.c
     emu2413.c
+    emu2151.cpp
+    ymfm/ymfm_opm.cpp
     msx_bus.pio
 )
 
