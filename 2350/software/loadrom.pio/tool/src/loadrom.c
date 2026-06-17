@@ -28,6 +28,8 @@
 #include "nextor_sunrise.h"
 #include "esp8266p_rom.h"
 #include "fmpac_bios.h"
+#include "opl4_fw.h"
+#include "yrw801_rom.h"
 #include "sha1.h"
 #include "romdb.h"
 
@@ -399,7 +401,7 @@ static void print_usage(const char *prog_name) {
     size_t i;
     bool first = true;
 
-    printf("Usage: %s [-h] [-s1] [-m1] [-s2] [-m2] [-c1] [-c2] [-w] [-d] [-f] [-scc] [-sccplus] [-o <filename>] [romfile]\n", prog_name);
+    printf("Usage: %s [-h] [-s1] [-m1] [-s2] [-m2] [-c1] [-c2] [-4] [-w] [-d] [-f] [-scc] [-sccplus] [-o <filename>] [romfile]\n", prog_name);
     printf("\n");
     printf("Options:\n");
     printf("  -h, --help         Show this help message\n");
@@ -409,6 +411,8 @@ static void print_usage(const char *prog_name) {
     printf("  -m2, --mapper-usb  Build UF2 with Sunrise IDE Nextor ROM + 1MB PSRAM mapper (USB pendrive)\n");
     printf("  -c1, --carnivore2-sd  Build UF2 with Sunrise IDE Nextor ROM + 1MB PSRAM mapper + Carnivore2 RAM emulation (microSD card)\n");
     printf("  -c2, --carnivore2-usb Build UF2 with Sunrise IDE Nextor ROM + 1MB PSRAM mapper + Carnivore2 RAM emulation (USB pendrive)\n");
+    printf("  -4, --opl4         Build UF2 with the standalone OPL4 / YMF278B / MoonSound cartridge firmware (2MB YRW801-M ROM + 2MB PCM sample RAM)\n");
+    printf("      --opl4-limit   (with -4) Enable the adaptive PCM voice limiter: sheds PCM voices on extreme-polyphony songs to avoid audio underrun, trading some peak voices for smooth playback\n");
     printf("  -w, --wifi         Enable ESP-01 WiFi support for Sunrise IDE Nextor modes (-s1/-m1/-s2/-m2 only)\n");
     printf("  -d, --dual-psg     Enable secondary PSG emulation on I/O ports 0x10/0x11\n");
     printf("  -f, -fmpac         Enable MSX-MUSIC/YM2413 emulation on I/O ports 0x7C/0x7D\n");
@@ -588,6 +592,8 @@ int main(int argc, char *argv[])
     bool use_mapper_usb = false;
     bool use_c2_sd = false;
     bool use_c2_usb = false;
+    bool use_opl4 = false;
+    bool opl4_limit = false;
     bool use_wifi = false;
     bool dual_psg = false;
     bool msx_music = false;
@@ -610,6 +616,10 @@ int main(int argc, char *argv[])
             use_c2_sd = true;
         } else if ((strcmp(argv[i], "-c2") == 0) || (strcmp(argv[i], "--carnivore2-usb") == 0)) {
             use_c2_usb = true;
+        } else if ((strcmp(argv[i], "-4") == 0) || (strcmp(argv[i], "--opl4") == 0)) {
+            use_opl4 = true;
+        } else if (strcmp(argv[i], "--opl4-limit") == 0) {
+            opl4_limit = true;
         } else if ((strcmp(argv[i], "-w") == 0) || (strcmp(argv[i], "--wifi") == 0)) {
             use_wifi = true;
         } else if ((strcmp(argv[i], "-d") == 0) || (strcmp(argv[i], "--dual-psg") == 0)) {
@@ -649,6 +659,108 @@ int main(int argc, char *argv[])
 
     bool use_nextor = use_sunrise_sd || use_mapper_sd || use_sunrise_usb || use_mapper_usb
                    || use_c2_sd || use_c2_usb;
+
+    if (opl4_limit && !use_opl4) {
+        printf("Option --opl4-limit requires -4/--opl4.\n");
+        return 1;
+    }
+
+    // -------------------------------------------------------------------
+    // Standalone OPL4 / MoonSound cartridge (-4 / --opl4)
+    // -------------------------------------------------------------------
+    // Writes a firmware-only UF2 with the 2 MB YRW801-M wave ROM appended
+    // directly after the firmware image. The firmware finds the ROM at
+    // __flash_binary_end (offset 0 relative to the end of the binary).
+    if (use_opl4) {
+        if (use_nextor || dual_psg || msx_music || scc_emulation || scc_plus
+            || use_wifi || rom_filename) {
+            printf("Option -4/--opl4 is standalone and cannot be combined with other modes or a ROM file.\n");
+            return 1;
+        }
+
+        const uint8_t *fw_data = ___pico_opl4_dist_opl4_bin;
+        const size_t fw_size = sizeof(___pico_opl4_dist_opl4_bin);
+        const uint8_t *yrw_data = ___resources_YRW801_M___Yamaha___1993_rom;
+        const size_t yrw_size = (size_t)___resources_YRW801_M___Yamaha___1993_rom_len;
+
+        // 16-byte config header written between the firmware and the ROM. The
+        // firmware reads it at __flash_binary_end: magic "PVO4" + flags byte.
+        uint8_t cfg_header[16];
+        memset(cfg_header, 0, sizeof(cfg_header));
+        cfg_header[0] = 'P'; cfg_header[1] = 'V'; cfg_header[2] = 'O'; cfg_header[3] = '4';
+        cfg_header[4] = opl4_limit ? 0x01u : 0x00u;
+        const size_t cfg_size = sizeof(cfg_header);
+
+        printf("Mode: OPL4 / YMF278B / MoonSound (dedicated cartridge)\n");
+        printf("Firmware Size: %zu bytes\n", fw_size);
+        printf("YRW801-M ROM Size: %zu bytes\n", yrw_size);
+        printf("Adaptive voice limiter: %s\n", opl4_limit ? "ON (reduced peak polyphony)" : "OFF (full fidelity)");
+        printf("UF2 Output: %s\n", output_filename);
+
+        FILE *uf2_file = fopen(output_filename, "wb");
+        if (!uf2_file) {
+            perror("Failed to create UF2 file");
+            return 1;
+        }
+
+        const size_t total_size = fw_size + cfg_size + yrw_size;
+
+        UF2_Block bl;
+        memset(&bl, 0, sizeof(bl));
+        bl.magicStart0 = UF2_MAGIC_START0;
+        bl.magicStart1 = UF2_MAGIC_START1;
+        bl.flags = UF2_FLAG_FAMILYID_PRESENT;
+        bl.magicEnd = UF2_MAGIC_END;
+        bl.targetAddr = FLASH_START;
+        bl.payloadSize = 256;
+        bl.numBlocks = (uint32_t)((total_size + bl.payloadSize - 1) / bl.payloadSize);
+        bl.fileSize = RP2350_FAMILY_ID;
+
+        size_t fw_off = 0;
+        size_t cfg_off = 0;
+        size_t yrw_off = 0;
+        size_t total_written = 0;
+        uint32_t block_no = 0;
+        while (total_written < total_size) {
+            memset(bl.data, 0, sizeof(bl.data));
+            size_t chunk_filled = 0;
+
+            while (chunk_filled < bl.payloadSize && total_written < total_size) {
+                size_t to_copy;
+                size_t space = bl.payloadSize - chunk_filled;
+                if (fw_off < fw_size) {
+                    size_t remaining = fw_size - fw_off;
+                    to_copy = remaining < space ? remaining : space;
+                    memcpy(bl.data + chunk_filled, fw_data + fw_off, to_copy);
+                    fw_off += to_copy;
+                } else if (cfg_off < cfg_size) {
+                    size_t remaining = cfg_size - cfg_off;
+                    to_copy = remaining < space ? remaining : space;
+                    memcpy(bl.data + chunk_filled, cfg_header + cfg_off, to_copy);
+                    cfg_off += to_copy;
+                } else {
+                    size_t remaining = yrw_size - yrw_off;
+                    to_copy = remaining < space ? remaining : space;
+                    memcpy(bl.data + chunk_filled, yrw_data + yrw_off, to_copy);
+                    yrw_off += to_copy;
+                }
+                chunk_filled += to_copy;
+                total_written += to_copy;
+            }
+
+            bl.blockNo = block_no++;
+            if (fwrite(&bl, 1, sizeof(bl), uf2_file) != sizeof(bl)) {
+                printf("Failed to write UF2 block %u.\n", block_no - 1);
+                fclose(uf2_file);
+                return 1;
+            }
+            bl.targetAddr += bl.payloadSize;
+        }
+
+        fclose(uf2_file);
+        printf("\nSuccessfully wrote %u blocks to %s.\n", block_no, output_filename);
+        return 0;
+    }
 
     if (use_wifi && !(use_sunrise_sd || use_mapper_sd || use_sunrise_usb || use_mapper_usb)) {
         printf("Error: -w/--wifi is supported only with -s1, -m1, -s2 or -m2.\n");

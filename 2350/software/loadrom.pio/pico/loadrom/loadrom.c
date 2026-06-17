@@ -3051,8 +3051,14 @@ void __no_inline_not_in_flash_func(loadrom_fmpac)(uint32_t offset, bool cache_en
 
     uint8_t bank8_regs[4] = {0, 1, 2, 3};
     uint8_t ascii16_regs[2] = {0, 1};
-    uint16_t neo8_regs[6] = {0, 1, 2, 3, 4, 5};
-    uint16_t neo16_regs[3] = {0, 1, 2};
+    // Neo-8/Neo-16 power-on with every 8 KB / 16 KB window mapped to segment 0,
+    // matching the standalone loadrom_neo8/loadrom_neo16 loaders. The boot "AB"
+    // header lives at segment 0, so all windows must reset to 0 for the BIOS to
+    // find it at 0x4000 during the expanded-slot scan. Initialising these to
+    // {0,1,2,...} exposed segment 1 at 0x4000, hiding the header and leaving the
+    // MSX in BASIC even though the same ROM boots fine without FM-PAC.
+    uint16_t neo8_regs[6] = {0, 0, 0, 0, 0, 0};
+    uint16_t neo16_regs[3] = {0, 0, 0};
     uint16_t ascii16x_regs[2] = {0, 0};
 
     const uint8_t *rom_base;
@@ -3071,6 +3077,14 @@ void __no_inline_not_in_flash_func(loadrom_fmpac)(uint32_t offset, bool cache_en
     bank16_ctx_t neo16_ctx = { .bank_regs = neo16_regs };
 
     msx_pio_bus_init();
+
+    // Launch the MSX-MUSIC Core 1 + I2S audio output only now that the
+    // expanded-slot bootstrap has finished and the FM-PAC bus responder is
+    // live. Starting it earlier (in main()) let the audio core/DMA perturb
+    // the cold-boot expanded-slot handshake, which left the MSX dropping to
+    // BASIC instead of launching the game.
+    if (msx_music_enabled)
+        msx_music_start_audio();
 
     while (true)
     {
@@ -4075,9 +4089,13 @@ int __no_inline_not_in_flash_func(main)()
     switch (audio_mode)
     {
         case AUDIO_MODE_MSX_MUSIC:
+            // Only initialise the YM2413 emulator here. The Core 1 + I2S
+            // audio output is launched later, inside loadrom_fmpac() after
+            // the expanded-slot bootstrap releases /WAIT, so the running
+            // audio core/DMA cannot disturb the timing-critical cold-boot
+            // FM-PAC bus handshake (mirrors the Explorer ordering).
             msx_music_enabled = true;
             msx_music_init();
-            msx_music_start_audio();
             break;
 
         case AUDIO_MODE_DUAL_PSG:

@@ -39,6 +39,10 @@ ESP8266P_ROM := ../../wifi/bios/ESP8266P.rom
 ESP8266P_ROM_H := $(SRCDIR)/esp8266p_rom.h
 FMPAC_BIOS := ../fmpac/FMPCCMFC.BIN
 FMPAC_BIOS_H := $(SRCDIR)/fmpac_bios.h
+OPL4BIN   := ../pico/opl4/dist/opl4.bin
+OPL4BIN_H := $(SRCDIR)/opl4_fw.h
+YRW801_ROM := ../resources/YRW801-M\ -\ Yamaha\ -\ 1993.rom
+YRW801_ROM_H := $(SRCDIR)/yrw801_rom.h
 
 # Helpers
 RM := rm -f
@@ -51,7 +55,7 @@ compile: $(BINDIR)/$(OUTFILE)
 
 package: $(DISDIR)/loadrom.exe
 
-$(BINDIR)/$(OUTFILE): $(BINDIR) $(SRCDIR)/$(SOURCES) $(PICOBIN_H) $(PICOBIN) $(NEXTOR_SUNRISE_H) $(NEXTOR_SUNRISE) $(ESP8266P_ROM_H) $(ESP8266P_ROM) $(FMPAC_BIOS_H) $(FMPAC_BIOS)
+$(BINDIR)/$(OUTFILE): $(BINDIR) $(SRCDIR)/$(SOURCES) $(PICOBIN_H) $(PICOBIN) $(NEXTOR_SUNRISE_H) $(NEXTOR_SUNRISE) $(ESP8266P_ROM_H) $(ESP8266P_ROM) $(FMPAC_BIOS_H) $(FMPAC_BIOS) $(OPL4BIN_H) $(OPL4BIN) $(YRW801_ROM_H) $(YRW801_ROM)
 	@echo "Compiling $@"
 	$(CC) $(CCFLAGS) -DAPP_VERSION=\"$(VERSION)\" $(SRCDIR)/$(SOURCES) -o $@
 
@@ -71,6 +75,14 @@ $(FMPAC_BIOS_H): $(FMPAC_BIOS)
 	@echo "Embedding FM-PAC BIOS ROM into header"
 	$(UTLDIR)/$(XXD) -i $< $@
 
+$(OPL4BIN_H): $(OPL4BIN)
+	@echo "Embedding standalone OPL4 firmware into header"
+	$(UTLDIR)/$(XXD) -i $< $@
+
+$(YRW801_ROM_H): $(YRW801_ROM)
+	@echo "Embedding YRW801-M OPL4 ROM into header"
+	$(UTLDIR)/$(XXD) -i "$<" $@
+
 $(BINDIR):
 	@mkdir $@
 
@@ -83,5 +95,5 @@ $(DISDIR)/loadrom.exe: $(DISDIR) $(BINDIR)/$(OUTFILE)
 
 clean:
 	@echo "Cleaning ...."
-	$(RM) $(BINDIR)/*.exe $(BINDIR)/*.uf2 $(SRCDIR)/loadrom.h $(SRCDIR)/nextor_sunrise.h $(SRCDIR)/esp8266p_rom.h $(SRCDIR)/fmpac_bios.h
+	$(RM) $(BINDIR)/*.exe $(BINDIR)/*.uf2 $(SRCDIR)/loadrom.h $(SRCDIR)/nextor_sunrise.h $(SRCDIR)/esp8266p_rom.h $(SRCDIR)/fmpac_bios.h $(SRCDIR)/opl4_fw.h $(SRCDIR)/yrw801_rom.h
 	$(RM) $(DISDIR)/*

@@ -9,12 +9,15 @@
 ######################################################################
 
 # Shared version (can be overridden on the command line)
-VERSION ?= v2.58
+VERSION ?= v2.61
 
 # Paths
 PICO_DIR := pico/loadrom
 PICO_BUILD := $(PICO_DIR)/build
 PICO_CONFIG := $(PICO_BUILD)/CMakeCache.txt
+OPL4_DIR := pico/opl4
+OPL4_BUILD := $(OPL4_DIR)/build
+OPL4_CONFIG := $(OPL4_BUILD)/CMakeCache.txt
 TOOL_DIR := tool
 WIFI_DIR := ../wifi
 WIFI_BIOS_DIR := $(WIFI_DIR)/bios
@@ -35,9 +38,9 @@ CMAKE_MAKE_PROGRAM_FLAG := $(if $(CMAKE_MAKE_PROGRAM),-DCMAKE_MAKE_PROGRAM="$(CM
 # Make options
 MAKE ?= make
 
-.PHONY: all bios updater firmware tool clean
+.PHONY: all bios updater firmware opl4 tool clean
 
-all: bios updater firmware tool
+all: bios updater firmware opl4 tool
 
 bios:
 	@echo "Building WiFi BIOS ROM"
@@ -50,7 +53,14 @@ firmware: $(PICO_CONFIG)
 $(PICO_CONFIG):
 	@$(CMAKE) $(CMAKE_GENERATOR_FLAG) $(CMAKE_MAKE_PROGRAM_FLAG) -S "$(PICO_DIR)" -B "$(PICO_BUILD)" -DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE)
 
-tool: bios
+opl4: $(OPL4_CONFIG)
+	@echo "Building standalone OPL4 firmware"
+	@$(CMAKE) --build "$(OPL4_BUILD)"
+
+$(OPL4_CONFIG):
+	@$(CMAKE) $(CMAKE_GENERATOR_FLAG) $(CMAKE_MAKE_PROGRAM_FLAG) -S "$(OPL4_DIR)" -B "$(OPL4_BUILD)" -DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE)
+
+tool: bios opl4
 	@echo "Building PC tool"
 	@"$(MAKE)" -C "$(TOOL_DIR)" VERSION=$(VERSION)
 
@@ -60,3 +70,5 @@ clean:
 	@"$(MAKE)" -C "$(TOOL_DIR)" clean VERSION=$(VERSION)
 	@$(CMAKE) --build "$(PICO_BUILD)" --target clean || true
 	@$(CMAKE) -E rm -rf "$(PICO_BUILD)"
+	@$(CMAKE) --build "$(OPL4_BUILD)" --target clean || true
+	@$(CMAKE) -E rm -rf "$(OPL4_BUILD)"
